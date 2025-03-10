@@ -1,5 +1,6 @@
 import re
-
+import base64
+from typing import Optional
 from fastapi import HTTPException
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,3 +66,29 @@ def validate_password_schema(password: str):
     if not any(c in '!@#$%^&*(),.?":{}|<>' for c in password):
         raise ValueError("Password must contain at least one special character.")
     return password
+
+def is_valid_base64(data: str) -> bool:
+    """Перевіряє, чи є рядок дійсним Base64"""
+    try:
+        if data.startswith(
+            "data:image",
+        ):  # 🔹 Видаляємо `data:image/png;base64,` якщо є
+            print("Detected data:image, stripping prefix")  # 🛠 Логування
+            data = data.split(",")[1]
+        base64.b64decode(data, validate=True)
+        return True
+    except Exception as e:
+        print(f"❌ Invalid Base64: {e}")  # 🛠 Логування помилки
+        return False
+
+
+def validate_cover_image(cover_image: Optional[str]):
+    """Перевіряє коректність cover_image у форматі Base64."""
+    if cover_image:
+        print("Checking Base64 validity...")
+        if not is_valid_base64(cover_image):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid cover_image format. Expected a valid Base64 string.",
+            )
+        print("✅ Base64 is valid!")

@@ -17,8 +17,8 @@ class Book(Base):
     cover_image = Column(String, nullable=True)
     is_reserved = Column(Boolean, default=False)
     is_checked_out = Column(Boolean, default=False)
-    createdAt = Column(DateTime, server_default=func.now())
-    updatedAt = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     ratings = relationship(
         "Rating",

@@ -1,6 +1,5 @@
-import base64
 from typing import Optional
-
+from fastapi import Query
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -11,23 +10,9 @@ from app.models.book import Book
 from app.models.rating import Rating
 from app.schemas.schemas import BookCreate, BookResponse, BookUpdate, RateBook
 from app.services.user_service import get_current_user_id, librarian_required
+from app.oauth2 import validate_cover_image
 
 router = APIRouter(prefix="/books", tags=["Books"])
-
-
-def is_valid_base64(data: str) -> bool:
-    """Перевіряє, чи є рядок дійсним Base64"""
-    try:
-        if data.startswith(
-            "data:image",
-        ):  # 🔹 Видаляємо `data:image/png;base64,` якщо є
-            print("Detected data:image, stripping prefix")  # 🛠 Логування
-            data = data.split(",")[1]
-        base64.b64decode(data, validate=True)
-        return True
-    except Exception as e:
-        print(f"❌ Invalid Base64: {e}")  # 🛠 Логування помилки
-        return False
 
 
 @router.post(
@@ -55,15 +40,7 @@ async def create_book(
             detail="A book with this title and author already exists.",
         )
 
-    # Якщо передано `cover_image`, перевіряємо його коректність
-    if book_data.cover_image:
-        print("Checking Base64 validity...")
-        if not is_valid_base64(book_data.cover_image):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid cover_image format. Expected a valid Base64 string.",
-            )
-        print("✅ Base64 is valid!")
+    validate_cover_image(book_data.cover_image)
 
     new_book = Book(**book_data.model_dump())
     db.add(new_book)
@@ -72,7 +49,7 @@ async def create_book(
     return new_book
 
 
-@router.put(
+@router.patch(
     "/{book_id}",
     response_model=BookResponse,
     status_code=status.HTTP_200_OK,
@@ -91,14 +68,7 @@ async def update_book(
             detail="Book not found",
         )
 
-    if book_data.cover_image:
-        print("Checking Base64 validity...")
-        if not is_valid_base64(book_data.cover_image):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid cover_image format. Expected a valid Base64 string.",
-            )
-        print("✅ Base64 is valid!")
+    validate_cover_image(book_data.cover_image)
 
     for key, value in book_data.model_dump(exclude_unset=True).items():
         setattr(book, key, value)
@@ -136,7 +106,21 @@ async def delete_book(
     return {"message": "Book deleted successfully"}
 
 
-@router.get("/all", response_model=list[BookResponse])
+# Отримати одну книгу за ID
+@router.get(
+    "/find/{book_id}", 
+    response_model=BookResponse, 
+    status_code=status.HTTP_200_OK
+)
+async def find_book(book_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Book).where(Book.id == book_id))
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    return book
+
+
+@router.get("/all", response_model=dict)
 async def list_books(
     db: AsyncSession = Depends(get_db),
     title: Optional[str] = None,
@@ -144,50 +128,66 @@ async def list_books(
     category: Optional[str] = None,
     year: Optional[int] = None,
     language: Optional[str] = None,
+    page: int = Query(1, ge=1, description="Номер сторінки (починається з 1)"),
+    per_page: int = Query(10, ge=1, le=100, description="Кількість книг на сторінку (1-100)"),
 ):
 
-    stmt = (
-        select(Book, func.coalesce(func.avg(Rating.rating), 0).label("average_rating"))
-        .outerjoin(Rating)
-        .group_by(Book.id)
-    )
+    base_stmt = select(Book).outerjoin(Rating).group_by(Book.id)
 
     if title:
-        stmt = stmt.where(Book.title.ilike(f"%{title}%"))
+        base_stmt = base_stmt.where(Book.title.ilike(f"%{title}%"))
     if author:
-        stmt = stmt.where(Book.author.ilike(f"%{author}%"))
+        base_stmt = base_stmt.where(Book.author.ilike(f"%{author}%"))
     if category:
-        stmt = stmt.where(Book.category.ilike(f"%{category}%"))
+        base_stmt = base_stmt.where(Book.category.ilike(f"%{category}%"))
     if year:
-        stmt = stmt.where(Book.year == year)
+        base_stmt = base_stmt.where(Book.year == year)
     if language:
-        stmt = stmt.where(Book.language.ilike(f"%{language}%"))
+        base_stmt = base_stmt.where(Book.language.ilike(f"%{language}%"))
 
-    result = await db.execute(stmt)
-    books = result.fetchall()
+    # Отримуємо загальну кількість книг, які відповідають фільтрам
+    total_books = await db.scalar(select(func.count()).select_from(base_stmt.subquery()))
 
-    if not books:
+    if total_books == 0:
         raise HTTPException(
             status_code=404,
             detail="No books found with the given criteria.",
         )
 
-    return [
-        {
-            "id": book.id,
-            "title": book.title,
-            "author": book.author,
-            "year": book.year,
-            "category": book.category,
-            "language": book.language,
-            "description": book.description,
-            "is_reserved": book.is_reserved,
-            "is_checked_out": book.is_checked_out,
-            "average_rating": round(float(average_rating), 1),
-            "coverImage": book.cover_image,
-        }
-        for book, average_rating in books
-    ]
+    # Додаємо сортування та пагінацію
+    stmt = (
+        base_stmt
+        .add_columns(func.coalesce(func.avg(Rating.rating), 0).label("average_rating"))
+        .order_by(Book.created_at.desc())
+        .limit(per_page)
+        .offset((page - 1) * per_page)
+    )
+
+    result = await db.execute(stmt)
+    books = result.fetchall()
+
+    return {
+        "total_books": total_books,
+        "total_pages": (total_books // per_page) + (1 if total_books % per_page else 0),
+        "current_page": page,
+        "per_page": per_page,
+        "books": [
+            {
+                "id": book.id,
+                "title": book.title,
+                "author": book.author,
+                "year": book.year,
+                "category": book.category,
+                "language": book.language,
+                "description": book.description,
+                "is_reserved": book.is_reserved,
+                "is_checked_out": book.is_checked_out,
+                "average_rating": round(float(average_rating), 1),
+                "coverImage": book.cover_image,
+            }
+            for book, average_rating in books
+        ],
+    }
 
 
 @router.post("/rate/{book_id}", status_code=status.HTTP_200_OK)

@@ -6,9 +6,9 @@ from sqlalchemy.orm import relationship
 from app.dependencies.database import Base
 
 
-class RoleEnum(str, PyEnum):
-    reader = "reader"
-    librarian = "librarian"
+class UserRole(str, PyEnum):
+    READER = "reader"
+    LIBRARIAN = "librarian"
 
 
 class User(Base):
@@ -20,13 +20,18 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     role = Column(
-        Enum(RoleEnum, native_enum=False),
-        default=RoleEnum.reader,
+        Enum(UserRole, native_enum=False),
+        default=UserRole.READER,
         nullable=False,
     )
 
     ratings = relationship(
         "Rating",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    reservations = relationship(
+        "Reservation",
         back_populates="user",
         cascade="all, delete-orphan",
     )

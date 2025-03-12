@@ -1,8 +1,12 @@
-from enum import Enum
+from datetime import datetime
+from enum import Enum as PyEnum
 from typing import Annotated, Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.models.book import BookStatus
+from app.models.reservation import ReservationStatus
+from app.models.user import UserRole
 from app.oauth2 import validate_password_schema
 
 
@@ -19,11 +23,6 @@ class BaseSchema(BaseModel):
 
         populate_by_name = True
         from_attributes = True
-
-
-class UserRole(str, Enum):
-    librarian = "librarian"
-    reader = "reader"
 
 
 class LoginRequest(BaseModel):
@@ -103,13 +102,12 @@ class BookCreate(BookBase):
 
 
 class BookUpdate(BookBase):
-    pass
+    status: Optional[BookStatus] = None
 
 
 class BookResponse(BookBase):
     id: int
-    is_reserved: bool
-    is_checked_out: bool
+    status: BookStatus
     average_rating: float = 0.0
 
     class Config:
@@ -118,3 +116,19 @@ class BookResponse(BookBase):
 
 class RateBook(BaseModel):
     rating: int = Field(ge=1, le=5, description="Рейтинг від 1 до 5")
+
+
+class ReservationCreate(BaseModel):
+    book_id: int
+
+
+class ReservationResponse(BaseModel):
+    id: int
+    book_id: int
+    user_id: int
+    status: ReservationStatus
+    created_at: datetime
+    expires_at: datetime
+
+    class Config:
+        from_attributes = True

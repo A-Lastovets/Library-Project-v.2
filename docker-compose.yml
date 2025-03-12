@@ -1,49 +1,13 @@
 services:
-  db:
-    image: postgres:15
-    restart: on-failure
-    ports:
-      - '5432:5432'
-    environment: &db-variables
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
-      POSTGRES_DB: ${POSTGRES_DB:-fastapi}
-      POSTGRES_HOST: ${POSTGRES_HOST:-db}
-      DATABASE_PORT: ${DATABASE_PORT:-5432}
-    volumes:
-      - postgres-db:/var/lib/postgresql/data
-    networks:
-      - app_network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7
-    restart: on-failure
-    ports:
-      - '6379:6379'
-    command: bash -c 'redis-server --requirepass ${REDIS_PASSWORD:-password}'
-    environment: &redis-variables
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-password}
-      REDIS_HOST: ${REDIS_HOST:-redis}
-      REDIS_PORT: ${REDIS_PORT:-6379}
-    volumes:
-      - cache:/data
-    networks:
-      - app_network
-
   alembic:
     build:
       context: .
       dockerfile: Dockerfile
     depends_on:
-      db:
-        condition: service_healthy
+      app:
+        condition: service_started
     environment:
-      <<: *db-variables
+      DATABASE_URL: ${DATABASE_URL}  # Хмарна база PostgreSQL
       MAKE_MIGRATIONS: ${MAKE_MIGRATIONS:-false}
       MAKE_MIGRATION_DOWNGRADE: ${MAKE_MIGRATION_DOWNGRADE:-false}
       MIGRATION_DOWNGRADE_TARGET: ${MIGRATION_DOWNGRADE_TARGET:-63017c98c3da}
@@ -66,20 +30,45 @@ services:
     ports:
       - "5001:5000"
     environment:
-      <<:
-        - *db-variables
-        - *redis-variables
+      DATABASE_URL: ${DATABASE_URL}  # Хмарна база PostgreSQL
+      REDIS_URL: ${REDIS_URL}  # Хмарний Redis
     depends_on:
-      - redis
-      - db
-      - alembic
+      alembic:
+        condition: service_started
     networks:
       - app_network
 
-volumes:
-  postgres-db:
-  cache:
-    driver: local
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    container_name: celery_worker
+    command: celery -A app.services.celery worker --loglevel=info
+    environment:
+      DATABASE_URL: ${DATABASE_URL}  # Хмарна база PostgreSQL
+      REDIS_URL: ${REDIS_URL}  # Хмарний Redis
+    depends_on:
+      app:
+        condition: service_started
+    networks:
+      - app_network
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    container_name: celery_beat
+    command: celery -A app.services.celery beat --loglevel=info
+    environment:
+      DATABASE_URL: ${DATABASE_URL}  # Хмарна база PostgreSQL
+      REDIS_URL: ${REDIS_URL}  # Хмарний Redis
+    depends_on:
+      celery_worker:
+        condition: service_started
+    networks:
+      - app_network
 
 networks:
   app_network:

@@ -1,6 +1,7 @@
-import re
 import base64
+import re
 from typing import Optional
+
 from fastapi import HTTPException
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,6 +67,7 @@ def validate_password_schema(password: str):
     if not any(c in '!@#$%^&*(),.?":{}|<>' for c in password):
         raise ValueError("Password must contain at least one special character.")
     return password
+
 
 def is_valid_base64(data: str) -> bool:
     """Перевіряє, чи є рядок дійсним Base64"""

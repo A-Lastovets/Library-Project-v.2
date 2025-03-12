@@ -1,16 +1,16 @@
 from typing import Optional
-from fastapi import Query
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.sql import func
 
 from app.dependencies.database import get_db
-from app.models.book import Book
+from app.models.book import Book, BookStatus
 from app.models.rating import Rating
+from app.oauth2 import validate_cover_image
 from app.schemas.schemas import BookCreate, BookResponse, BookUpdate, RateBook
 from app.services.user_service import get_current_user_id, librarian_required
-from app.oauth2 import validate_cover_image
 
 router = APIRouter(prefix="/books", tags=["Books"])
 
@@ -42,7 +42,7 @@ async def create_book(
 
     validate_cover_image(book_data.cover_image)
 
-    new_book = Book(**book_data.model_dump())
+    new_book = Book(**book_data.model_dump(), status=BookStatus.AVAILABLE)
     db.add(new_book)
     await db.commit()
     await db.refresh(new_book)
@@ -95,7 +95,7 @@ async def delete_book(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Book not found",
         )
-    if book.is_reserved or book.is_checked_out:
+    if book.status in {BookStatus.RESERVED, BookStatus.CHECKED_OUT}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Book is reserved or checked out",
@@ -108,15 +108,18 @@ async def delete_book(
 
 # Отримати одну книгу за ID
 @router.get(
-    "/find/{book_id}", 
-    response_model=BookResponse, 
-    status_code=status.HTTP_200_OK
+    "/find/{book_id}",
+    response_model=BookResponse,
+    status_code=status.HTTP_200_OK,
 )
 async def find_book(book_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Book).where(Book.id == book_id))
     book = result.scalar_one_or_none()
     if not book:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Book not found",
+        )
     return book
 
 
@@ -129,7 +132,12 @@ async def list_books(
     year: Optional[int] = None,
     language: Optional[str] = None,
     page: int = Query(1, ge=1, description="Номер сторінки (починається з 1)"),
-    per_page: int = Query(10, ge=1, le=100, description="Кількість книг на сторінку (1-100)"),
+    per_page: int = Query(
+        10,
+        ge=1,
+        le=100,
+        description="Кількість книг на сторінку (1-100)",
+    ),
 ):
 
     base_stmt = select(Book).outerjoin(Rating).group_by(Book.id)
@@ -146,7 +154,9 @@ async def list_books(
         base_stmt = base_stmt.where(Book.language.ilike(f"%{language}%"))
 
     # Отримуємо загальну кількість книг, які відповідають фільтрам
-    total_books = await db.scalar(select(func.count()).select_from(base_stmt.subquery()))
+    total_books = await db.scalar(
+        select(func.count()).select_from(base_stmt.subquery()),
+    )
 
     if total_books == 0:
         raise HTTPException(
@@ -156,8 +166,9 @@ async def list_books(
 
     # Додаємо сортування та пагінацію
     stmt = (
-        base_stmt
-        .add_columns(func.coalesce(func.avg(Rating.rating), 0).label("average_rating"))
+        base_stmt.add_columns(
+            func.coalesce(func.avg(Rating.rating), 0).label("average_rating"),
+        )
         .order_by(Book.created_at.desc())
         .limit(per_page)
         .offset((page - 1) * per_page)
@@ -180,8 +191,7 @@ async def list_books(
                 "category": book.category,
                 "language": book.language,
                 "description": book.description,
-                "is_reserved": book.is_reserved,
-                "is_checked_out": book.is_checked_out,
+                "status": book.status.value,
                 "average_rating": round(float(average_rating), 1),
                 "coverImage": book.cover_image,
             }

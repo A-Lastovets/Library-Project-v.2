@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import config
 from app.dependencies.cache import redis_client
 from app.dependencies.database import get_db
-from app.models.user import RoleEnum, User
+from app.models.user import User, UserRole
 from app.oauth2 import update_password, validate_password
 from app.roles import create_user
 from app.schemas.schemas import (
@@ -110,14 +110,12 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
     # Валідація пароля перед створенням користувача
     validate_password(user.password)
 
-    # Визначення ролі користувача (лікар або читач)
     role = (
         "librarian"
         if user.secret_code and user.secret_code.strip() == config.SECRET_LIBRARIAN_CODE
         else "reader"
     )
 
-    # Створюємо користувача
     created_user = await create_user(db, user, role)
 
     # Генеруємо токен після реєстрації
@@ -231,7 +229,7 @@ async def get_all_users(
     token_data = decode_jwt_token(token)
     role = token_data["role"]
 
-    if role != RoleEnum.librarian:
+    if role != UserRole.LIBRARIAN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions",

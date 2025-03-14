@@ -30,6 +30,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class LogoutResponse(BaseModel):
+    message: str
+
+
 class UserBase(BaseSchema):
     first_name: Annotated[str, Field(min_length=3, max_length=50)]
     last_name: Annotated[str, Field(min_length=3, max_length=50)]
@@ -70,7 +74,6 @@ class Token(BaseSchema):
     access_token: str
     refresh_token: str
     token_type: str
-    user: UserResponse
 
 
 class PasswordResetRequest(BaseSchema):

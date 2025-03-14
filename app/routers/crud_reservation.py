@@ -10,11 +10,11 @@ from app.models.reservation import Reservation, ReservationStatus
 from app.schemas.schemas import ReservationCreate, ReservationResponse
 from app.services.user_service import get_current_user_id, librarian_required
 
-router = APIRouter(prefix="/reservations", tags=["Reservations"])
+router = APIRouter(tags=["Reservations"])
 
 
 @router.post(
-    "/",
+    "/reservation",
     response_model=ReservationResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -118,7 +118,7 @@ async def cancel_reservation(
     return reservation
 
 
-@router.get("/", response_model=list[ReservationResponse])
+@router.get("/reservation", response_model=list[ReservationResponse])
 async def get_reservations(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),

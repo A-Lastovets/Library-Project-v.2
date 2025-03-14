@@ -8,15 +8,14 @@ from sqlalchemy.sql import func
 from app.dependencies.database import get_db
 from app.models.book import Book, BookStatus
 from app.models.rating import Rating
-from app.oauth2 import validate_cover_image
 from app.schemas.schemas import BookCreate, BookResponse, BookUpdate, RateBook
 from app.services.user_service import get_current_user_id, librarian_required
 
-router = APIRouter(prefix="/books", tags=["Books"])
+router = APIRouter(tags=["Books"])
 
 
 @router.post(
-    "/",
+    "/books",
     response_model=BookResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -39,8 +38,6 @@ async def create_book(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A book with this title and author already exists.",
         )
-
-    validate_cover_image(book_data.cover_image)
 
     new_book = Book(**book_data.model_dump(), status=BookStatus.AVAILABLE)
     db.add(new_book)
@@ -67,8 +64,6 @@ async def update_book(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Book not found",
         )
-
-    validate_cover_image(book_data.cover_image)
 
     for key, value in book_data.model_dump(exclude_unset=True).items():
         setattr(book, key, value)
@@ -108,7 +103,7 @@ async def delete_book(
 
 # Отримати одну книгу за ID
 @router.get(
-    "/find/{book_id}",
+    "/find{book_id}",
     response_model=BookResponse,
     status_code=status.HTTP_200_OK,
 )
@@ -200,7 +195,7 @@ async def list_books(
     }
 
 
-@router.post("/rate/{book_id}", status_code=status.HTTP_200_OK)
+@router.post("/rate{book_id}", status_code=status.HTTP_200_OK)
 async def rate_book(
     book_id: int,
     rating_data: RateBook,

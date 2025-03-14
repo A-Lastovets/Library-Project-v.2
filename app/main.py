@@ -5,6 +5,7 @@ from logging.config import dictConfig
 from fastapi import FastAPI
 
 from app.config import LogConfig
+from app.dependencies.cache import redis_client
 from app.dependencies.database import Base, SessionLocal, engine
 from app.middlewares.middlewares import setup_middlewares
 from app.roles import create_admin
@@ -16,13 +17,32 @@ logger = logging.getLogger("app")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)  # Спочатку створення таблиць
+    """Управління ресурсами під час життєвого циклу API"""
 
-    async with SessionLocal() as db:
-        await create_admin(db)  # Створення адміна
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)  # Створення таблиць БД
 
-    yield
+        async with SessionLocal() as db:
+            await create_admin(db)  # Створення адміна
+
+        # ✅ Ініціалізація Redis
+        redis = await redis_client.get_redis()  # Отримуємо підключення
+        if redis:
+            logger.info("✅ Redis успішно підключено")
+        else:
+            logger.error("❌ Не вдалося підключитися до Redis!")
+
+        yield  # ✅ Дозволяє запустити додаток без помилок
+
+    except Exception as e:
+        logger.error(f"❌ Помилка при запуску сервера: {e}")
+        raise e
+
+    finally:
+        # ✅ Коректне закриття підключення до Redis
+        await redis_client.close_redis()
+        logger.info("🔴 Підключення до Redis закрито")
 
 
 app = FastAPI(
@@ -38,3 +58,5 @@ setup_middlewares(app)
 app.include_router(auth.router)
 app.include_router(crud_books.router)
 app.include_router(crud_reservation.router)
+
+logger.info("🚀 Library API успішно запущено!")

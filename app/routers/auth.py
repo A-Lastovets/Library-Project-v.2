@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -14,6 +15,7 @@ from app.oauth2 import update_password, validate_password
 from app.roles import create_user
 from app.schemas.schemas import (
     LoginRequest,
+    LogoutResponse,
     PasswordReset,
     PasswordResetRequest,
     Token,
@@ -34,8 +36,8 @@ from app.utils import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["auth"])
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/sign-in-swagger")
+router = APIRouter(tags=["Auth"])
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/sign-in-swagger")
 
 
 # 🔑 Логін користувача (отримання JWT-токена)
@@ -71,24 +73,13 @@ async def sign_in(
             },
         )
 
-    access_token = create_access_token(
-        user_id=str(user.id),
-        role=user.role.value,
-    )
-
-    refresh_token = create_refresh_token(user_id=str(user.id), role=user.role.value)
+    access_token = create_access_token(user)
+    refresh_token = create_refresh_token(user)
 
     return Token(
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer",
-        user=UserResponse(
-            id=user.id,
-            first_name=user.first_name,
-            last_name=user.last_name,
-            email=user.email,
-            role=user.role.value,
-        ),
     )
 
 
@@ -118,30 +109,37 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
 
     created_user = await create_user(db, user, role)
 
-    # Генеруємо токен після реєстрації
-    access_token = create_access_token(
-        user_id=str(created_user.id),
-        role=created_user.role.value,
-    )
+    access_token = create_access_token(created_user)
+    refresh_token = create_refresh_token(created_user)
 
-    refresh_token = create_refresh_token(
-        user_id=str(created_user.id),
-        role=created_user.role.value,
-    )
-
-    # Використовуємо `Token` як response_model
     return Token(
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer",
-        user=UserResponse(
-            id=created_user.id,
-            first_name=created_user.first_name,
-            last_name=created_user.last_name,
-            email=created_user.email,
-            role=created_user.role.value,
-        ),
     )
+
+
+@router.post("/logout", response_model=LogoutResponse, status_code=200)
+async def logout(refresh_token: str):
+    """Вихід із системи (відкликання `refreshToken`)."""
+
+    redis = await redis_client.get_redis()
+
+    # Перевіряємо, чи токен вже відкликано
+    if await redis.exists(f"blacklist:{refresh_token}"):
+        raise HTTPException(status_code=401, detail="Token already revoked")
+
+    # Декодуємо токен (перевіряємо його валідність)
+    try:
+        decode_jwt_token(refresh_token)  # Просто перевіряємо, чи токен дійсний
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    # Додаємо токен у чорний список Redis (на той же термін, що і його термін дії)
+    await redis.setex(f"blacklist:{refresh_token}", 7 * 24 * 60 * 60, "revoked")
+    logger.info(f"Refresh token revoked: {refresh_token}")
+
+    return {"message": "Successfully logged out"}
 
 
 # Запит на скидання пароля
@@ -150,6 +148,7 @@ async def request_password_reset(
     data: PasswordResetRequest,
     db: AsyncSession = Depends(get_db),
 ):
+    redis = await redis_client.get_redis()
     user = await get_user_by_email(db, data.email)
     # Завжди повертаємо однакове повідомлення для безпеки
     response_message = {
@@ -162,7 +161,7 @@ async def request_password_reset(
 
     # Якщо користувач є, створюємо токен і відправляємо email
     token = create_password_reset_token(user.email)
-    await redis_client.setex(
+    await redis.setex(
         f"password-reset:{token}",
         config.RESET_TOKEN_EXPIRE_MINUTES * 60,
         user.email,
@@ -176,9 +175,13 @@ async def request_password_reset(
 
 # Скидання пароля (повертаємо оновлену інформацію про користувача)
 @router.post("/password-reset", status_code=status.HTTP_200_OK)
-async def reset_password(data: PasswordReset, db: AsyncSession = Depends(get_db)):
+async def reset_password(
+    data: PasswordReset,
+    db: AsyncSession = Depends(get_db),
+):
+    redis = await redis_client.get_redis()
     try:
-        email = await redis_client.get(f"password-reset:{data.token}")
+        email = await redis.get(f"password-reset:{data.token}")
         if not email:
             logger.warning(f"Invalid or expired token: {data.token}")
             raise HTTPException(status_code=400, detail="Invalid or expired token")
@@ -212,7 +215,7 @@ async def reset_password(data: PasswordReset, db: AsyncSession = Depends(get_db)
             detail="Could not update password. Try again later.",
         )
     # Видаляємо токен тільки після успішного оновлення пароля
-    await redis_client.delete(f"password-reset:{data.token}")
+    await redis.delete(f"password-reset:{data.token}")
 
     logger.info(f"Password reset successful for {email}")
     return {"message": "Password has been reset successfully. Please log in again."}
@@ -238,16 +241,7 @@ async def get_all_users(
     result = await db.execute(select(User))
     users = result.scalars().all()
 
-    return [
-        UserResponse(
-            id=user.id,
-            first_name=user.first_name,
-            last_name=user.last_name,
-            email=user.email,
-            role=user.role.value,
-        )
-        for user in users
-    ]
+    return [UserResponse.model_validate(user) for user in users]
 
 
 # 🔑 Логін через Swagger UI (OAuth2 Password Flow)
@@ -272,10 +266,7 @@ async def sign_in_swagger(
             detail="Invalid email or password",
         )
 
-    access_token = create_access_token(
-        user_id=str(user.id),
-        role=user.role.value,
-    )
+    access_token = create_access_token(user)
 
     return {
         "access_token": access_token,
@@ -285,43 +276,29 @@ async def sign_in_swagger(
 
 @router.post("/refresh-token", response_model=Token, status_code=200)
 async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
-    """✅ Оновлення `access_token` за допомогою `refresh_token`"""
+    """Оновлення `access_token` за допомогою `refresh_token`"""
 
-    try:
-        token_data = decode_jwt_token(refresh_token)
-    except HTTPException as e:
-        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    redis = await redis_client.get_redis()
 
-    user_id = token_data["user_id"]
-    role = token_data["role"]
+    # Перевіряємо, чи `refreshToken` у чорному списку Redis
+    if await redis.exists(f"blacklist:{refresh_token}"):
+        raise HTTPException(status_code=401, detail="Refresh token is revoked")
 
-    # Отримуємо користувача з БД (переконуємось, що користувач існує)
-    result = await db.execute(select(User).where(User.id == int(user_id)))
+    # Декодуємо токен
+    token_data = decode_jwt_token(refresh_token)
+
+    # Отримуємо користувача
+    result = await db.execute(select(User).where(User.id == int(token_data["user_id"])))
     user = result.scalar_one_or_none()
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Створюємо нові токени
-    new_access_token = create_access_token(
-        user_id=str(user.id),
-        role=role,
-    )
-
-    new_refresh_token = create_refresh_token(
-        user_id=str(user.id),
-        role=token_data["role"],
-    )
+    # Створюємо новий `accessToken`, що містить всю інформацію про користувача
+    new_access_token = create_access_token(user)
 
     return Token(
         access_token=new_access_token,
-        refresh_token=new_refresh_token,
+        refresh_token=refresh_token,
         token_type="bearer",
-        user=UserResponse(
-            id=user.id,
-            first_name=user.first_name,
-            last_name=user.last_name,
-            email=user.email,
-            role=user.role.value,
-        ),
     )

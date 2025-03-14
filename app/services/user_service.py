@@ -8,7 +8,7 @@ from app.models.user import User
 from app.utils import decode_jwt_token
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/sign-in-swagger")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/sign-in-swagger")
 
 
 # Отримати користувача за email

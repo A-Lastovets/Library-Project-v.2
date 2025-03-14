@@ -1,12 +1,11 @@
 import logging
 import os
 
-from fastapi import Depends, HTTPException
+from fastapi import HTTPException
 from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.database import get_db
 from app.models.user import User
 from app.schemas.schemas import UserCreate
 from app.services.user_service import get_user_by_email

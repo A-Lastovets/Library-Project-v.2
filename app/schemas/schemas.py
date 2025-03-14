@@ -1,5 +1,5 @@
 from datetime import datetime
-from enum import Enum as PyEnum
+from enum import Enum
 from typing import Annotated, Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -128,6 +128,7 @@ class ReservationCreate(BaseModel):
 class ReservationResponse(BaseModel):
     id: int
     book_id: int
+    book: Optional[BookBase] = None
     user_id: int
     status: ReservationStatus
     created_at: datetime

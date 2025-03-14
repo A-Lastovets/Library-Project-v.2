@@ -47,7 +47,7 @@ async def create_book(
 
 
 @router.patch(
-    "/{book_id}",
+    "/books{book_id}",
     response_model=BookResponse,
     status_code=status.HTTP_200_OK,
 )
@@ -74,7 +74,7 @@ async def update_book(
 
 
 @router.delete(
-    "/{book_id}",
+    "/books{book_id}",
     response_model=dict,
     status_code=status.HTTP_200_OK,
 )
@@ -103,7 +103,7 @@ async def delete_book(
 
 # Отримати одну книгу за ID
 @router.get(
-    "/find{book_id}",
+    "/books/find{book_id}",
     response_model=BookResponse,
     status_code=status.HTTP_200_OK,
 )
@@ -118,7 +118,7 @@ async def find_book(book_id: int, db: AsyncSession = Depends(get_db)):
     return book
 
 
-@router.get("/all", response_model=dict)
+@router.get("/books/all", response_model=dict)
 async def list_books(
     db: AsyncSession = Depends(get_db),
     title: Optional[str] = None,
@@ -195,7 +195,7 @@ async def list_books(
     }
 
 
-@router.post("/rate{book_id}", status_code=status.HTTP_200_OK)
+@router.post("/books/rate{book_id}", status_code=status.HTTP_200_OK)
 async def rate_book(
     book_id: int,
     rating_data: RateBook,

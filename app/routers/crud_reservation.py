@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import joinedload
 
 from app.dependencies.database import get_db
 from app.models.book import Book, BookStatus
@@ -14,7 +16,7 @@ router = APIRouter(tags=["Reservations"])
 
 
 @router.post(
-    "/reservation",
+    "/reservations/reservation",
     response_model=ReservationResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -23,8 +25,13 @@ async def create_reservation(
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
 ):
-    """📌 Створення бронювання книги (тільки якщо книга доступна)."""
-    book = await db.get(Book, reservation_data.book_id)
+    """Створення бронювання книги (тільки якщо книга доступна)."""
+    result = await db.execute(
+        select(Book)
+        .options(joinedload(Book.reservations))
+        .where(Book.id == reservation_data.book_id),
+    )
+    book = result.scalars().first()
 
     if not book:
         raise HTTPException(
@@ -38,32 +45,40 @@ async def create_reservation(
             detail="Book is not available for reservation",
         )
 
-    # Створюємо нове бронювання
-    expires_at = datetime.now() + timedelta(days=5)
-    reservation = Reservation(
-        book_id=reservation_data.book_id,
+    new_reservation = Reservation(
+        book_id=book.id,
         user_id=user_id,
         status=ReservationStatus.PENDING,
-        expires_at=expires_at,
+        expires_at=datetime.now() + timedelta(days=5),
     )
 
-    book.status = BookStatus.RESERVED  # Оновлюємо статус книги
+    db.add(new_reservation)
+    book.status = BookStatus.RESERVED
 
-    db.add(reservation)
+    db.add(new_reservation)
     await db.commit()
-    await db.refresh(reservation)
+    await db.refresh(new_reservation, ["book"])
 
-    return reservation
+    return new_reservation
 
 
-@router.patch("/{reservation_id}/confirm", response_model=ReservationResponse)
+@router.patch(
+    "/reservations/reservation_id/{reservation_id}/confirm",
+    response_model=ReservationResponse,
+)
 async def confirm_reservation(
     reservation_id: int,
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
 ):
-    """✅ Підтвердження бронювання бібліотекарем."""
-    reservation = await db.get(Reservation, reservation_id)
+    """Підтвердження бронювання бібліотекарем (обмеження на отримання книги 5 днів)."""
+
+    result = await db.execute(
+        select(Reservation)
+        .options(joinedload(Reservation.book))  # Завантажуємо book разом із бронюванням
+        .where(Reservation.id == reservation_id),
+    )
+    reservation = result.scalars().first()
 
     if not reservation:
         raise HTTPException(
@@ -77,23 +92,38 @@ async def confirm_reservation(
             detail="Reservation is not pending",
         )
 
+    # Отримуємо книгу, щоб оновити її статус
     book = await db.get(Book, reservation.book_id)
+    if not book:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Associated book not found",
+        )
+
     book.status = BookStatus.CHECKED_OUT  # Книга видається читачеві
 
+    # Обмеження: книгу потрібно забрати протягом 5 днів
+    reservation.expires_at = datetime.now() + timedelta(days=5)
     reservation.status = ReservationStatus.CONFIRMED
+
     await db.commit()
-    await db.refresh(reservation)
+    await db.refresh(reservation, ["book"])
 
     return reservation
 
 
-@router.patch("/{reservation_id}/cancel", response_model=ReservationResponse)
-async def cancel_reservation(
+@router.patch(
+    "/reservations/reservation_id/{reservation_id}/decline",
+    response_model=ReservationResponse,
+)
+async def decline_reservation(
     reservation_id: int,
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
+    librarian: dict = Depends(librarian_required),
 ):
-    """❌ Скасування бронювання користувачем або бібліотекарем."""
+    """Скасування бронювання користувачем або бібліотекарем."""
+
     reservation = await db.get(Reservation, reservation_id)
 
     if not reservation:
@@ -102,34 +132,53 @@ async def cancel_reservation(
             detail="Reservation not found",
         )
 
-    if reservation.user_id != user_id:
+    # Бібліотекар може скасувати будь-яке бронювання
+    if reservation.user_id != user_id and not librarian:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only cancel your own reservations",
         )
 
+    # Отримуємо книгу
     book = await db.get(Book, reservation.book_id)
+    if not book:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Associated book not found",
+        )
+
     book.status = BookStatus.AVAILABLE  # Книга знову доступна
 
     reservation.status = ReservationStatus.CANCELLED
+
     await db.commit()
-    await db.refresh(reservation)
+    await db.refresh(reservation, ["book"])
 
     return reservation
 
 
-@router.get("/reservation", response_model=list[ReservationResponse])
+@router.get("/reservations/all", response_model=list[ReservationResponse])
 async def get_reservations(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
+    status: Optional[ReservationStatus] = Query(
+        None,
+        description="Фільтр за статусом бронювання",
+    ),
 ):
-    """📄 Отримання всіх бронювань (тільки для бібліотекаря)."""
-    result = await db.execute(select(Reservation))
-    reservations = result.scalars().all()
+    """📄 Отримання всіх бронювань (тільки для бібліотекаря) з можливістю фільтрації за статусом."""
+    query = select(Reservation).options(joinedload(Reservation.book))
+
+    if status:  # Якщо передано параметр статусу, додаємо фільтр
+        query = query.where(Reservation.status == status)
+
+    result = await db.execute(query)
+    reservations = result.scalars().unique().all()
+
     if not reservations:
         raise HTTPException(
             status_code=404,
-            detail="No active reservations found.",
+            detail="No reservations found with the given criteria.",
         )
 
     return reservations

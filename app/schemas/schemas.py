@@ -1,9 +1,10 @@
+import re
 from datetime import datetime
-from enum import Enum
 from typing import Annotated, Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.config import config
 from app.models.book import BookStatus
 from app.models.reservation import ReservationStatus
 from app.models.user import UserRole
@@ -48,6 +49,17 @@ class UserCreate(BaseSchema):
     confirm_password: str = Field(..., min_length=8, max_length=100)
     secret_code: Optional[str] = None
 
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, email: str):
+        """Перевіряємо email додатково через regex"""
+        pattern = (
+            r"^(?!\.)(?!.*\.\.)[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]{2,63}\.[a-zA-Z]{2,63}$"
+        )
+        if not re.match(pattern, email):
+            raise ValueError("Invalid email format")
+        return email
+
     @field_validator("password")
     @classmethod
     def validate_password(cls, password: str):
@@ -61,10 +73,20 @@ class UserCreate(BaseSchema):
             raise ValueError("Passwords do not match")
         return confirm_password
 
+    @field_validator("secret_code")
+    @classmethod
+    def validate_secret_code(cls, secret_code: Optional[str]):
+        """Перевірка кодового слова"""
+        allowed_code = config.SECRET_LIBRARIAN_CODE
+        if secret_code is not None and secret_code.strip() != allowed_code:
+            raise ValueError("Invalid secret code")
+        return secret_code
+
 
 class UserResponse(UserBase):
     id: int
     role: UserRole
+    is_blocked: bool
 
     class Config:
         from_attributes = True
@@ -129,7 +151,7 @@ class ReservationResponse(BaseModel):
     id: int
     book_id: int
     book: Optional[BookBase] = None
-    user_id: int
+    user: UserResponse
     status: ReservationStatus
     created_at: datetime
     expires_at: datetime

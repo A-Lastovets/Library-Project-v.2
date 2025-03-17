@@ -1,5 +1,4 @@
 import logging
-from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -26,6 +25,7 @@ from app.services.email_tasks import send_password_reset_email
 from app.services.user_service import (
     authenticate_user,
     get_user_by_email,
+    librarian_required,
 )
 from app.utils import (
     create_access_token,
@@ -101,11 +101,16 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
     # Валідація пароля перед створенням користувача
     validate_password(user.password)
 
-    role = (
-        "librarian"
-        if user.secret_code and user.secret_code.strip() == config.SECRET_LIBRARIAN_CODE
-        else "reader"
-    )
+    # Перевіряємо, чи користувач вказав кодове слово
+    if user.secret_code:
+        if user.secret_code.strip() != config.SECRET_LIBRARIAN_CODE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid secret code",
+            )
+        role = "librarian"
+    else:
+        role = "reader"  # Якщо кодового слова немає, користувач буде читачем
 
     created_user = await create_user(db, user, role)
 
@@ -242,6 +247,31 @@ async def get_all_users(
     users = result.scalars().all()
 
     return [UserResponse.model_validate(user) for user in users]
+
+
+@router.patch("/users/{user_id}/unblock", response_model=UserResponse)
+async def unblock_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(librarian_required),
+):
+    """🔓 Розблокування користувача бібліотекарем."""
+
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not user.is_blocked:
+        raise HTTPException(
+            status_code=400,
+            detail="User is not blocked.",
+        )
+
+    user.is_blocked = False  # ✅ Знімаємо блокування
+    await db.commit()
+    await db.refresh(user)
+
+    return user
 
 
 # 🔑 Логін через Swagger UI (OAuth2 Password Flow)

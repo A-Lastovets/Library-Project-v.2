@@ -3,7 +3,10 @@ from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.sql import func
 
+from app.models.book import Book, BookStatus
+from app.models.reservation import Reservation
 from app.models.user import User
 from app.utils import decode_jwt_token
 
@@ -48,3 +51,26 @@ async def librarian_required(token: str = Depends(oauth2_scheme)):
         )
 
     return token_data
+
+
+async def check_and_block_user(db: AsyncSession, user_id: int):
+    """Перевіряє, чи потрібно заблокувати користувача через прострочені книги."""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    result = await db.execute(
+        select(func.count())
+        .select_from(Reservation)
+        .join(Book, Book.id == Reservation.book_id)
+        .where(Reservation.user_id == user_id, Book.status == BookStatus.OVERDUE),
+    )
+    overdue_books_count = result.scalar()
+
+    if overdue_books_count >= 2:
+        user.is_blocked = True
+        await db.commit()  # ✅ Оновлюємо статус у базі
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are blocked due to overdue books. Contact the librarian to unblock.",
+        )

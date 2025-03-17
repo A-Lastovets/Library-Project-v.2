@@ -1,6 +1,6 @@
 from enum import Enum as PyEnum
 
-from sqlalchemy import Column, Enum, Integer, String
+from sqlalchemy import Boolean, Column, Enum, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.dependencies.database import Base
@@ -24,6 +24,7 @@ class User(Base):
         default=UserRole.READER,
         nullable=False,
     )
+    is_blocked = Column(Boolean, default=False)
 
     ratings = relationship(
         "Rating",

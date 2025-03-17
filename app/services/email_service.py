@@ -68,20 +68,3 @@ async def send_email(to_email: str, subject: str, message: str, html=False):
     except Exception as e:
         logger.error(f"General email error: {e}")
         return {"error": f"General error: {e}"}
-
-
-async def send_reservation_cancellation_email(user_email: str, book_title: str):
-    """📩 Відправляє email про скасування бронювання."""
-    subject = "Бронювання скасовано"
-    body = f"Ваше бронювання книги '{book_title}' було автоматично скасовано, оскільки ви не забрали її вчасно."
-    await send_email(user_email, subject, body)
-
-
-async def send_return_reminder_email(user_email: str, book_title: str, due_date: str):
-    """📩 Відправляє нагадування про повернення книги."""
-    subject = "Нагадування про повернення книги"
-    body = (
-        f"Нагадуємо, що термін повернення книги '{book_title}' закінчується {due_date}.\n"
-        "Будь ласка, поверніть її вчасно, щоб уникнути штрафів."
-    )
-    await send_email(user_email, subject, body)

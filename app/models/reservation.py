@@ -12,6 +12,8 @@ class ReservationStatus(str, PyEnum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
     CANCELLED = "cancelled"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
 
 
 class Reservation(Base):
@@ -34,7 +36,7 @@ class Reservation(Base):
         nullable=False,
     )
     created_at = Column(DateTime, server_default=func.now())
-    expires_at = Column(DateTime, nullable=False)  # Автоматичне скасування через 5 днів
+    expires_at = Column(DateTime, nullable=False)
 
     book = relationship("Book", back_populates="reservations")
     user = relationship("User", back_populates="reservations")

@@ -47,7 +47,7 @@ async def create_book(
 
 
 @router.patch(
-    "/books{book_id}",
+    "/books/{book_id}",
     response_model=BookResponse,
     status_code=status.HTTP_200_OK,
 )
@@ -74,7 +74,7 @@ async def update_book(
 
 
 @router.delete(
-    "/books{book_id}",
+    "/books/{book_id}",
     response_model=dict,
     status_code=status.HTTP_200_OK,
 )
@@ -103,7 +103,7 @@ async def delete_book(
 
 # Отримати одну книгу за ID
 @router.get(
-    "/books/find{book_id}",
+    "/books/find/{book_id}",
     response_model=BookResponse,
     status_code=status.HTTP_200_OK,
 )
@@ -195,7 +195,7 @@ async def list_books(
     }
 
 
-@router.post("/books/rate{book_id}", status_code=status.HTTP_200_OK)
+@router.post("/books/rate/{book_id}", status_code=status.HTTP_200_OK)
 async def rate_book(
     book_id: int,
     rating_data: RateBook,

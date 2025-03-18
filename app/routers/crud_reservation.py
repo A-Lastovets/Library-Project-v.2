@@ -121,7 +121,7 @@ async def create_reservation(
         book_id=book.id,
         user_id=user_id,
         status=ReservationStatus.PENDING,
-        expires_at=datetime.now() + timedelta(days=5),
+        expires_at=datetime.now() + timedelta(hours=5),
     )
 
     book.status = BookStatus.RESERVED
@@ -199,7 +199,7 @@ async def confirm_reservation_by_librarian(
         )
 
     # Обмеження: книгу потрібно забрати протягом 5 днів
-    reservation.expires_at = datetime.now() + timedelta(days=5)
+    reservation.expires_at = datetime.now() + timedelta(hours=5)
     reservation.status = ReservationStatus.CONFIRMED
 
     await db.commit()
@@ -261,7 +261,7 @@ async def confirm_book_checkout_by_librarian(
             detail="Book is not in 'reserved' status and cannot be issued.",
         )
 
-    reservation.expires_at = datetime.now() + timedelta(days=14)
+    reservation.expires_at = datetime.now() + timedelta(hours=8)
     reservation.status = ReservationStatus.ACTIVE
     book.status = BookStatus.CHECKED_OUT  # Книга видана користувачу
 

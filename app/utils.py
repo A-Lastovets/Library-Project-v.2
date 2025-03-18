@@ -18,6 +18,7 @@ def create_access_token(user: User):
         "last_name": user.last_name,
         "email": user.email,
         "role": user.role.value,
+        "is_blocked": user.is_blocked,
         "exp": datetime.now() + expires_delta,
     }
 
@@ -35,6 +36,7 @@ def create_refresh_token(user: User):
         "last_name": user.last_name,
         "email": user.email,
         "role": user.role.value,
+        "is_blocked": user.is_blocked,
         "exp": datetime.now() + expires_delta,
     }
 
@@ -74,12 +76,16 @@ def decode_jwt_token(token: str):
             "last_name": payload.get("last_name"),
             "email": payload.get("email"),
             "role": payload.get("role"),
+            "is_blocked": payload.get("is_blocked", False),
             "exp": payload.get("exp"),
         }
 
         # Переконуємось, що всі ключові поля є в токені
         if None in user_data.values():
             raise credentials_exception
+
+        if user_data["is_blocked"]:
+            raise HTTPException(status_code=403, detail="User is blocked")
 
         return user_data
 

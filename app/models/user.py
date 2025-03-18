@@ -24,7 +24,7 @@ class User(Base):
         default=UserRole.READER,
         nullable=False,
     )
-    is_blocked = Column(Boolean, default=False)
+    is_blocked = Column(Boolean, default=False, nullable=False)
 
     ratings = relationship(
         "Rating",

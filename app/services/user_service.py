@@ -11,7 +11,7 @@ from app.models.user import User
 from app.utils import decode_jwt_token
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/sign-in-swagger")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/sign-in-swagger")
 
 
 # Отримати користувача за email
@@ -25,7 +25,7 @@ def get_current_user_id(token: str = Depends(oauth2_scheme)) -> int:
     """Отримуємо user_id з JWT токена"""
     token_data = decode_jwt_token(token)
     user_id = int(token_data["user_id"])
-    print(f"🔹 Отримано user_id: {user_id}")  # Додаємо логування
+    print(f"Отримано user_id: {user_id}")  # Додаємо логування
     return int(token_data["user_id"])
 
 
@@ -69,7 +69,7 @@ async def check_and_block_user(db: AsyncSession, user_id: int):
 
     if overdue_books_count >= 2:
         user.is_blocked = True
-        await db.commit()  # ✅ Оновлюємо статус у базі
+        await db.commit()  # Оновлюємо статус у базі
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are blocked due to overdue books. Contact the librarian to unblock.",

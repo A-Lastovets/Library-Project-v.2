@@ -11,11 +11,11 @@ from app.models.rating import Rating
 from app.schemas.schemas import BookCreate, BookResponse, BookUpdate, RateBook
 from app.services.user_service import get_current_user_id, librarian_required
 
-router = APIRouter(tags=["Books"])
+router = APIRouter(prefix="/books", tags=["Books"])
 
 
 @router.post(
-    "/books",
+    "/",
     response_model=BookResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -47,7 +47,7 @@ async def create_book(
 
 
 @router.patch(
-    "/books/{book_id}",
+    "/{book_id}",
     response_model=BookResponse,
     status_code=status.HTTP_200_OK,
 )
@@ -74,7 +74,7 @@ async def update_book(
 
 
 @router.delete(
-    "/books/{book_id}",
+    "/{book_id}",
     response_model=dict,
     status_code=status.HTTP_200_OK,
 )
@@ -103,13 +103,24 @@ async def delete_book(
 
 # Отримати одну книгу за ID
 @router.get(
-    "/books/find/{book_id}",
+    "/find/{book_id}",
     response_model=BookResponse,
     status_code=status.HTTP_200_OK,
 )
-async def find_book(book_id: int, db: AsyncSession = Depends(get_db)):
+async def find_book(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+
     result = await db.execute(select(Book).where(Book.id == book_id))
     book = result.scalar_one_or_none()
+
     if not book:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -118,9 +129,10 @@ async def find_book(book_id: int, db: AsyncSession = Depends(get_db)):
     return book
 
 
-@router.get("/books/all", response_model=dict)
+@router.get("/all", response_model=dict)
 async def list_books(
     db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
     title: Optional[str] = None,
     author: Optional[str] = None,
     category: Optional[str] = None,
@@ -134,6 +146,12 @@ async def list_books(
         description="Кількість книг на сторінку (1-100)",
     ),
 ):
+
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
 
     base_stmt = select(Book).outerjoin(Rating).group_by(Book.id)
 
@@ -195,7 +213,7 @@ async def list_books(
     }
 
 
-@router.post("/books/rate/{book_id}", status_code=status.HTTP_200_OK)
+@router.post("/rate/{book_id}", status_code=status.HTTP_200_OK)
 async def rate_book(
     book_id: int,
     rating_data: RateBook,

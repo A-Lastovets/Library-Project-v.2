@@ -26,21 +26,19 @@ async def lifespan(app: FastAPI):
         async with SessionLocal() as db:
             await create_admin(db)  # Створення адміна
 
-        # ✅ Ініціалізація Redis
         redis = await redis_client.get_redis()  # Отримуємо підключення
         if redis:
             logger.info("✅ Redis успішно підключено")
         else:
             logger.error("❌ Не вдалося підключитися до Redis!")
 
-        yield  # ✅ Дозволяє запустити додаток без помилок
+        yield
 
     except Exception as e:
         logger.error(f"❌ Помилка при запуску сервера: {e}")
         raise e
 
     finally:
-        # ✅ Коректне закриття підключення до Redis
         await redis_client.close_redis()
         logger.info("🔴 Підключення до Redis закрито")
 
@@ -55,8 +53,8 @@ app = FastAPI(
 
 setup_middlewares(app)
 
-app.include_router(auth.router)
-app.include_router(crud_books.router)
-app.include_router(crud_reservation.router)
+app.include_router(auth.router, prefix="/api/v1")
+app.include_router(crud_books.router, prefix="/api/v1")
+app.include_router(crud_reservation.router, prefix="/api/v1")
 
-logger.info("🚀 Library API успішно запущено!")
+logger.info("Library API успішно запущено!")

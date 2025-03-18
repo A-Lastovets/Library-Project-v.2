@@ -21,11 +21,12 @@ from app.schemas.schemas import (
     UserCreate,
     UserResponse,
 )
-from app.services.email_tasks import send_password_reset_email
+from app.services.email_tasks import send_password_reset_email, send_welcome_email
 from app.services.user_service import (
     authenticate_user,
     get_user_by_email,
     librarian_required,
+    oauth2_scheme,
 )
 from app.utils import (
     create_access_token,
@@ -36,8 +37,7 @@ from app.utils import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Auth"])
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/sign-in-swagger")
+router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
 # 🔑 Логін користувача (отримання JWT-токена)
@@ -116,6 +116,8 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
 
     access_token = create_access_token(created_user)
     refresh_token = create_refresh_token(created_user)
+
+    send_welcome_email(user.email, user.first_name)
 
     return Token(
         access_token=access_token,
@@ -267,7 +269,7 @@ async def unblock_user(
             detail="User is not blocked.",
         )
 
-    user.is_blocked = False  # ✅ Знімаємо блокування
+    user.is_blocked = False
     await db.commit()
     await db.refresh(user)
 

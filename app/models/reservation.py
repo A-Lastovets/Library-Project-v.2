@@ -12,6 +12,7 @@ class ReservationStatus(str, PyEnum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
     CANCELLED = "cancelled"
+    ACTIVE = "active"
     COMPLETED = "completed"
     EXPIRED = "expired"
 

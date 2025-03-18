@@ -46,6 +46,7 @@ async def create_admin(db: AsyncSession):
         email=admin_email,
         hashed_password=pwd_context.hash(admin_password),
         role="librarian",
+        is_blocked=False,
     )
 
     db.add(admin)
@@ -66,6 +67,7 @@ async def create_user(db: AsyncSession, user_data: UserCreate, role: str):
         email=user_data.email.lower(),
         hashed_password=pwd_context.hash(user_data.password),
         role=role,
+        is_blocked=False,
     )
     db.add(user)
     await db.commit()

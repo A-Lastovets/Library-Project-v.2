@@ -44,14 +44,13 @@ async def send_email(to_email: str, subject: str, message: str, html=False):
         msg["Subject"] = subject
 
         footer = """
-        --
-        This is an automated message. Please do not reply.
+        Це автоматичний лист, будь ласка, не відповідайте на нього.
 
-        - Your Support Team
+        📚 Ваша бібліотека
         """
 
         if html:
-            full_message = f"{message}<br><br><p>--<br>This is an automated message. Please do not reply.<br><br>- Your Support Team</p>"
+            full_message = f"{message}<br><hr><p style='color: #888; font-size: 12px; text-align: center;'>{footer}</p>"
             msg.attach(MIMEText(full_message, "html"))
         else:
             msg.attach(MIMEText(message + footer, "plain"))

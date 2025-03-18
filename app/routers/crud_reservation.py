@@ -25,13 +25,13 @@ from app.services.user_service import (
     librarian_required,
 )
 
-router = APIRouter(tags=["Reservations"])
+router = APIRouter(prefix="/reservations", tags=["Reservations"])
 
 logger = logging.getLogger(__name__)
 
 
 @router.post(
-    "/reservations/reservation",
+    "/reservation",
     response_model=ReservationResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -93,7 +93,7 @@ async def create_reservation(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    # 🔹 **Перевіряємо, чи книга вже має активні бронювання**
+    # **Перевіряємо, чи книга вже має активні бронювання**
     result_existing_reservation = await db.execute(
         select(Reservation).where(
             Reservation.book_id == book.id,
@@ -154,7 +154,7 @@ async def create_reservation(
 
 
 @router.patch(
-    "/reservations/{reservation_id}/confirm/librarian",
+    "/{reservation_id}/confirm/librarian",
     response_model=ReservationResponse,
 )
 async def confirm_reservation_by_librarian(
@@ -221,25 +221,22 @@ async def confirm_reservation_by_librarian(
 
 
 @router.patch(
-    "/reservations/{reservation_id}/confirm/user",
+    "/{reservation_id}/checkout/librarian",
     response_model=ReservationResponse,
 )
-async def confirm_reservation_by_user(
+async def confirm_book_checkout_by_librarian(
     reservation_id: int,
     db: AsyncSession = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
+    _: dict = Depends(librarian_required),
 ):
-    """Читач підтверджує, що забрав книгу (починається відлік 14 днів)."""
+    """Бібліотекар підтверджує, що видав книгу читачу (починається відлік 14 днів)."""
 
     result = await db.execute(
         select(Reservation)
         .options(joinedload(Reservation.book), joinedload(Reservation.user))
         .where(
             Reservation.id == reservation_id,
-            Reservation.user_id
-            == user_id,  # Користувач може підтвердити лише свою книгу
-            Reservation.status
-            == ReservationStatus.CONFIRMED,  # Бронювання підтверджене бібліотекарем
+            Reservation.status == ReservationStatus.CONFIRMED,
         ),
     )
     reservation = result.scalars().first()
@@ -250,7 +247,6 @@ async def confirm_reservation_by_user(
             detail="Reservation not found or not eligible for confirmation",
         )
 
-    # 📚 Отримуємо книгу
     book = reservation.book  # Використовуємо завантажену книгу
 
     if not book:
@@ -259,14 +255,14 @@ async def confirm_reservation_by_user(
             detail="Associated book not found",
         )
 
-    if book.status == BookStatus.OVERDUE:
+    if book.status != BookStatus.RESERVED:
         raise HTTPException(
             status_code=400,
-            detail="This book is already overdue and cannot be confirmed.",
+            detail="Book is not in 'reserved' status and cannot be issued.",
         )
 
-    # Користувач отримує 14 днів на користування книгою
     reservation.expires_at = datetime.now() + timedelta(days=14)
+    reservation.status = ReservationStatus.ACTIVE
     book.status = BookStatus.CHECKED_OUT  # Книга видана користувачу
 
     await db.commit()
@@ -279,16 +275,16 @@ async def confirm_reservation_by_user(
         reservation.expires_at.strftime("%Y-%m-%d"),
     )
 
-    # Логування підтвердження отримання книги
+    # Логування підтвердження видачі книги
     logger.info(
-        f"Reservation {reservation.id} confirmed by user. Due date: {reservation.expires_at}",
+        f"Reservation {reservation.id} confirmed by librarian. Due date: {reservation.expires_at}",
     )
 
     return reservation
 
 
 @router.patch(
-    "/reservations/{reservation_id}/decline/librarian",
+    "/{reservation_id}/decline/librarian",
     response_model=ReservationResponse,
 )
 async def decline_reservation_librarian(
@@ -348,7 +344,7 @@ async def decline_reservation_librarian(
 
 
 @router.patch(
-    "/reservations/{reservation_id}/decline/user",
+    "/{reservation_id}/decline/user",
     response_model=ReservationResponse,
 )
 async def decline_reservation_user(
@@ -430,10 +426,10 @@ async def decline_reservation_user(
 
 
 @router.patch(
-    "/reservations/{reservation_id}/return",
+    "/{reservation_id}/return/librarian",
     response_model=ReservationResponse,
 )
-async def confirm_book_return(
+async def confirm_book_return_by_librarian(
     reservation_id: int,
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
@@ -489,7 +485,7 @@ async def confirm_book_return(
     return reservation
 
 
-@router.get("/reservations/librarian/all", response_model=list[ReservationResponse])
+@router.get("/librarian/all", response_model=list[ReservationResponse])
 async def get_reservations(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
@@ -510,16 +506,10 @@ async def get_reservations(
     result = await db.execute(query)
     reservations = result.scalars().unique().all()
 
-    if not reservations:
-        raise HTTPException(
-            status_code=404,
-            detail="No reservations found with the given criteria.",
-        )
-
     return reservations
 
 
-@router.get("/reservations/user/all", response_model=list[ReservationResponse])
+@router.get("/user/all", response_model=list[ReservationResponse])
 async def get_user_reservations(
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
@@ -533,8 +523,8 @@ async def get_user_reservations(
     query = (
         select(Reservation)
         .options(
-            joinedload(Reservation.book),  # Завантажуємо книгу
-            joinedload(Reservation.user),  # Завантажуємо користувача
+            joinedload(Reservation.book),
+            joinedload(Reservation.user),
         )
         .where(Reservation.user_id == user_id)
     )
@@ -551,11 +541,5 @@ async def get_user_reservations(
 
     result = await db.execute(query)
     reservations = result.scalars().unique().all()
-
-    if not reservations:
-        raise HTTPException(
-            status_code=404,
-            detail="No active reservations found.",
-        )
 
     return reservations

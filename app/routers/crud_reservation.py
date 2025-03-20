@@ -529,15 +529,8 @@ async def get_user_reservations(
         .where(Reservation.user_id == user_id)
     )
 
-    if status:  # Якщо передано параметр статусу, додаємо фільтр
+    if status is not None:
         query = query.where(Reservation.status == status)
-    else:
-        # За замовчуванням показуємо тільки активні бронювання (ті, що ще не закінчились)
-        query = query.where(
-            Reservation.status.in_(
-                [ReservationStatus.PENDING, ReservationStatus.CONFIRMED],
-            ),
-        )
 
     result = await db.execute(query)
     reservations = result.scalars().unique().all()

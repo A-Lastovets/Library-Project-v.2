@@ -9,6 +9,7 @@ from sqlalchemy.sql import func
 from app.dependencies.database import get_db
 from app.models.book import Book, BookStatus
 from app.models.rating import Rating
+from app.models.reservation import Reservation
 from app.schemas.schemas import (
     BookCreate,
     BookResponse,
@@ -253,6 +254,33 @@ async def list_books(
             for book, average_rating in books
         ],
     }
+
+
+@router.get("/user/all", response_model=list[BookResponse])
+async def get_user_books_by_status(
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+    status: Optional[BookStatus] = Query(
+        None,
+        description="Фільтр за статусом книги (AVAILABLE, RESERVED, CHECKED_OUT, OVERDUE)",
+    ),
+):
+    """📚 Отримання книг користувача (тільки тих, які він забронював чи взяв) з можливістю фільтрації."""
+
+    query = (
+        select(Book)
+        .join(Reservation, Book.id == Reservation.book_id)
+        .where(Reservation.user_id == user_id)
+    )
+
+    # Фільтр за статусом, якщо він переданий
+    if status is not None:
+        query = query.where(Book.status == status)
+
+    result = await db.execute(query)
+    books = result.scalars().unique().all()
+
+    return books
 
 
 @router.post("/rate/{book_id}", status_code=status.HTTP_200_OK)

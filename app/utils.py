@@ -13,7 +13,7 @@ def create_access_token(user: User):
     expires_delta = timedelta(minutes=config.ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode = {
-        "sub": str(user.id),
+        "id": str(user.id),
         "first_name": user.first_name,
         "last_name": user.last_name,
         "email": user.email,
@@ -31,7 +31,7 @@ def create_refresh_token(user: User):
     expires_delta = timedelta(days=config.REFRESH_TOKEN_EXPIRE_DAYS)
 
     to_encode = {
-        "sub": str(user.id),
+        "id": str(user.id),
         "first_name": user.first_name,
         "last_name": user.last_name,
         "email": user.email,
@@ -71,7 +71,7 @@ def decode_jwt_token(token: str):
 
         # Отримуємо всі дані з токена
         user_data = {
-            "user_id": payload.get("sub"),
+            "id": payload.get("id"),
             "first_name": payload.get("first_name"),
             "last_name": payload.get("last_name"),
             "email": payload.get("email"),

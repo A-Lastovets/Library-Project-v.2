@@ -24,9 +24,9 @@ async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
 def get_current_user_id(token: str = Depends(oauth2_scheme)) -> int:
     """Отримуємо user_id з JWT токена"""
     token_data = decode_jwt_token(token)
-    user_id = int(token_data["user_id"])
+    user_id = int(token_data["id"])
     print(f"Отримано user_id: {user_id}")  # Додаємо логування
-    return int(token_data["user_id"])
+    return user_id
 
 
 # Аутентифікація користувача
@@ -40,17 +40,29 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> User
 
 
 async def librarian_required(token: str = Depends(oauth2_scheme)):
-    """Перевірка ролі бібліотекаря через JWT-токен."""
+    """✅ Перевіряє, чи є користувач бібліотекарем і чи він не заблокований."""
     token_data = decode_jwt_token(token)
-    role = token_data.get("role")
 
+    # Отримуємо ID та роль користувача
+    librarian_id = token_data.get("id")
+    role = token_data.get("role")
+    is_blocked = token_data.get("is_blocked", False)
+
+    # Перевірка, чи є користувач бібліотекарем
     if role != "librarian":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied: Librarian role required",
         )
 
-    return token_data
+    # Перевірка, чи користувач не заблокований
+    if is_blocked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Your account is blocked",
+        )
+
+    return {"id": librarian_id, "role": role}
 
 
 async def check_and_block_user(db: AsyncSession, user_id: int):

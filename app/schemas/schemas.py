@@ -1,10 +1,10 @@
 import re
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.config import config
+# from app.config import config
 from app.models.book import BookStatus
 from app.models.reservation import ReservationStatus
 from app.models.user import UserRole
@@ -73,15 +73,6 @@ class UserCreate(BaseSchema):
             raise ValueError("Passwords do not match")
         return confirm_password
 
-    @field_validator("secret_code")
-    @classmethod
-    def validate_secret_code(cls, secret_code: Optional[str]):
-        """Перевірка кодового слова"""
-        allowed_code = config.SECRET_LIBRARIAN_CODE
-        if secret_code is not None and secret_code.strip() != allowed_code:
-            raise ValueError("Invalid secret code")
-        return secret_code
-
 
 class UserResponse(UserBase):
     id: int
@@ -137,6 +128,15 @@ class BookResponse(BookBase):
 
     class Config:
         from_attributes = True
+
+
+class BulkUpdateRequest(BaseModel):
+    ids: List[int]
+
+
+class BulkUpdateResponse(BaseModel):
+    message: str
+    updated_items: List[int]
 
 
 class RateBook(BaseModel):

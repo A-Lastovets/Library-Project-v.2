@@ -1,6 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import String, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.sql import func
@@ -8,7 +9,14 @@ from sqlalchemy.sql import func
 from app.dependencies.database import get_db
 from app.models.book import Book, BookStatus
 from app.models.rating import Rating
-from app.schemas.schemas import BookCreate, BookResponse, BookUpdate, RateBook
+from app.schemas.schemas import (
+    BookCreate,
+    BookResponse,
+    BookUpdate,
+    BulkUpdateRequest,
+    BulkUpdateResponse,
+    RateBook,
+)
 from app.services.user_service import get_current_user_id, librarian_required
 
 router = APIRouter(prefix="/books", tags=["Books"])
@@ -57,7 +65,7 @@ async def update_book(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
 ):
-    """✏️ Оновлення книги (тільки бібліотекар)."""
+    """ Оновлення книги (тільки бібліотекар)."""
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(
@@ -75,30 +83,56 @@ async def update_book(
 
 @router.delete(
     "/{book_id}",
-    response_model=dict,
+    response_model=BulkUpdateResponse,
     status_code=status.HTTP_200_OK,
 )
-async def delete_book(
-    book_id: int,
+async def delete_multiple_books(
+    request: BulkUpdateRequest,
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
 ):
-    """🗑 Видалення книги (тільки бібліотекар, перевіряємо бронювання)."""
-    book = await db.get(Book, book_id)
-    if not book:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Book not found",
-        )
-    if book.status in {BookStatus.RESERVED, BookStatus.CHECKED_OUT}:
+    """ Видалення кількох книг (тільки бібліотекар, перевіряємо бронювання)."""
+    book_ids = request.ids
+
+    if not book_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Book is reserved or checked out",
+            detail="No book IDs provided.",
         )
 
-    await db.delete(book)
+    # Отримуємо книги за їх ID
+    stmt = select(Book).where(Book.id.in_(book_ids))
+    result = await db.execute(stmt)
+    books = result.scalars().all()
+
+    if not books:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No books found with the given IDs.",
+        )
+
+    # Перевіряємо, чи є серед книг ті, які не можна видаляти
+    restricted_books = [
+        book.id
+        for book in books
+        if book.status in {BookStatus.RESERVED, BookStatus.CHECKED_OUT}
+    ]
+
+    if restricted_books:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot delete books with IDs {restricted_books} as they are reserved or checked out.",
+        )
+
+    for book in books:
+        await db.delete(book)
+
     await db.commit()
-    return {"message": "Book deleted successfully"}
+
+    return {
+        "message": "Books deleted successfully",
+        "updated_items": [book.id for book in books],
+    }
 
 
 # Отримати одну книгу за ID
@@ -138,6 +172,7 @@ async def list_books(
     category: Optional[str] = None,
     year: Optional[int] = None,
     language: Optional[str] = None,
+    query: Optional[str] = None,
     page: int = Query(1, ge=1, description="Номер сторінки (починається з 1)"),
     per_page: int = Query(
         10,
@@ -162,20 +197,35 @@ async def list_books(
     if category:
         base_stmt = base_stmt.where(Book.category.ilike(f"%{category}%"))
     if year:
-        base_stmt = base_stmt.where(Book.year == year)
+        base_stmt = base_stmt.where(Book.year.cast(String).ilike(f"%{year}%"))
     if language:
         base_stmt = base_stmt.where(Book.language.ilike(f"%{language}%"))
+
+    if query:
+        search_terms = query.split()
+
+        search_conditions = and_(
+            *(
+                (
+                    Book.year == int(word)
+                    if word.isdigit()
+                    else or_(
+                        Book.title.ilike(f"%{word}%"),
+                        Book.author.ilike(f"%{word}%"),
+                        Book.category.ilike(f"%{word}%"),
+                        Book.language.ilike(f"%{word}%"),
+                    )
+                )
+                for word in search_terms
+            ),
+        )
+
+        base_stmt = base_stmt.where(search_conditions)
 
     # Отримуємо загальну кількість книг, які відповідають фільтрам
     total_books = await db.scalar(
         select(func.count()).select_from(base_stmt.subquery()),
     )
-
-    if total_books == 0:
-        raise HTTPException(
-            status_code=404,
-            detail="No books found with the given criteria.",
-        )
 
     # Додаємо сортування та пагінацію
     stmt = (

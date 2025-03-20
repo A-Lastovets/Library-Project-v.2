@@ -1,7 +1,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import config
 from app.dependencies.cache import redis_client
 from app.dependencies.database import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.oauth2 import update_password, validate_password
 from app.roles import create_user
 from app.schemas.schemas import (
+    BulkUpdateRequest,
+    BulkUpdateResponse,
     LoginRequest,
     LogoutResponse,
     PasswordReset,
@@ -26,7 +28,6 @@ from app.services.user_service import (
     authenticate_user,
     get_user_by_email,
     librarian_required,
-    oauth2_scheme,
 )
 from app.utils import (
     create_access_token,
@@ -101,16 +102,11 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
     # Валідація пароля перед створенням користувача
     validate_password(user.password)
 
-    # Перевіряємо, чи користувач вказав кодове слово
-    if user.secret_code:
-        if user.secret_code.strip() != config.SECRET_LIBRARIAN_CODE:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid secret code",
-            )
-        role = "librarian"
-    else:
-        role = "reader"  # Якщо кодового слова немає, користувач буде читачем
+    role = (
+        "librarian"
+        if user.secret_code and user.secret_code.strip() == config.SECRET_LIBRARIAN_CODE
+        else "reader"
+    )
 
     created_user = await create_user(db, user, role)
 
@@ -232,18 +228,9 @@ async def reset_password(
 @router.get("/users", response_model=list[UserResponse], status_code=status.HTTP_200_OK)
 async def get_all_users(
     db: AsyncSession = Depends(get_db),
-    token: str = Depends(oauth2_scheme),
+    _: dict = Depends(librarian_required),
 ):
     """Отримати всіх користувачів (тільки для librarian)."""
-
-    token_data = decode_jwt_token(token)
-    role = token_data["role"]
-
-    if role != UserRole.LIBRARIAN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions",
-        )
 
     result = await db.execute(select(User))
     users = result.scalars().all()
@@ -251,29 +238,108 @@ async def get_all_users(
     return [UserResponse.model_validate(user) for user in users]
 
 
-@router.patch("/users/{user_id}/unblock", response_model=UserResponse)
-async def unblock_user(
-    user_id: int,
+@router.patch("/users/block", response_model=BulkUpdateResponse)
+async def block_users(
+    request: BulkUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    librarian: dict = Depends(librarian_required),
+):
+    """Блокування одного або кількох користувачів бібліотекарем."""
+
+    user_ids = request.ids
+
+    if not user_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="No user IDs provided.",
+        )
+
+    # Забороняємо блокувати самого себе
+    librarian_id = librarian["id"]
+    if librarian_id in user_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="You cannot block your own account.",
+        )
+
+    # Отримуємо користувачів за їх ID
+    stmt = select(User).where(User.id.in_(user_ids))
+    result = await db.execute(stmt)
+    users = result.scalars().all()
+
+    if not users:
+        raise HTTPException(
+            status_code=404,
+            detail="No users found with the given IDs.",
+        )
+
+    # Фільтруємо лише тих, хто ще не заблокований
+    users_to_block = [user for user in users if not user.is_blocked]
+
+    if not users_to_block:
+        raise HTTPException(
+            status_code=400,
+            detail="All provided users are already blocked.",
+        )
+
+    # Блокуємо користувачів
+    for user in users_to_block:
+        user.is_blocked = True
+
+    await db.commit()
+
+    return BulkUpdateResponse(
+        message="Users blocked successfully",
+        updated_items=[user.id for user in users_to_block],
+    )
+
+
+@router.patch("/users/unblock", response_model=BulkUpdateResponse)
+async def unblock_users(
+    request: BulkUpdateRequest,
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
 ):
-    """🔓 Розблокування користувача бібліотекарем."""
+    """🔓 Розблокування одного або кількох користувачів бібліотекарем."""
 
-    user = await db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user_ids = request.ids  # Отримуємо список ID користувачів
 
-    if not user.is_blocked:
+    if not user_ids:
         raise HTTPException(
             status_code=400,
-            detail="User is not blocked.",
+            detail="No user IDs provided.",
         )
 
-    user.is_blocked = False
-    await db.commit()
-    await db.refresh(user)
+    # Отримуємо користувачів за їх ID
+    stmt = select(User).where(User.id.in_(user_ids))
+    result = await db.execute(stmt)
+    users = result.scalars().all()
 
-    return user
+    if not users:
+        raise HTTPException(
+            status_code=404,
+            detail="No users found with the given IDs.",
+        )
+
+    # Фільтруємо лише заблокованих користувачів
+    users_to_unblock = [user for user in users if user.is_blocked]
+
+    if not users_to_unblock:
+        raise HTTPException(
+            status_code=400,
+            detail="No blocked users found in the provided list.",
+        )
+
+    # Розблоковуємо користувачів
+    for user in users_to_unblock:
+        user.is_blocked = False
+
+    await db.commit()
+
+    return BulkUpdateResponse(
+        message="Users unblocked successfully",
+        updated_items=[user.id for user in users_to_unblock],
+    )
 
 
 # 🔑 Логін через Swagger UI (OAuth2 Password Flow)

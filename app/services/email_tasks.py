@@ -302,7 +302,7 @@ def check_and_cancel_expired_reservations():
                 select(Reservation)
                 .options(joinedload(Reservation.book), joinedload(Reservation.user))
                 .where(
-                    Reservation.expires_at < now - timedelta(hours=5),
+                    Reservation.expires_at < now,
                     Reservation.status == ReservationStatus.CONFIRMED,
                 ),
             )
@@ -331,7 +331,7 @@ def check_and_send_return_reminders():
     async def task():
         async with SessionLocal() as db:
             now = datetime.now()
-            reminder_date = now + timedelta(hours=8)
+            reminder_date = now + timedelta(days=3)
 
             result = await db.execute(
                 select(Reservation)

@@ -255,7 +255,7 @@ async def block_users(
         )
 
     # Забороняємо блокувати самого себе
-    librarian_id = librarian["id"]
+    librarian_id = int(librarian["id"]) 
     if librarian_id in user_ids:
         raise HTTPException(
             status_code=400,

@@ -65,7 +65,7 @@ async def update_book(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
 ):
-    """ Оновлення книги (тільки бібліотекар)."""
+    """✏️ Оновлення книги (тільки бібліотекар)."""
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(
@@ -91,7 +91,7 @@ async def delete_multiple_books(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
 ):
-    """ Видалення кількох книг (тільки бібліотекар, перевіряємо бронювання)."""
+    """🗑 Видалення кількох книг (тільки бібліотекар, перевіряємо бронювання)."""
     book_ids = request.ids
 
     if not book_ids:
@@ -144,13 +144,8 @@ async def delete_multiple_books(
 async def find_book(
     book_id: int,
     db: AsyncSession = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
+    _: int = Depends(get_current_user_id),
 ):
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-        )
 
     result = await db.execute(select(Book).where(Book.id == book_id))
     book = result.scalar_one_or_none()
@@ -163,15 +158,16 @@ async def find_book(
     return book
 
 
-@router.get("/all", response_model=dict)
+@router.get("/all", response_model=dict, status_code=status.HTTP_200_OK)
 async def list_books(
     db: AsyncSession = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
+    _: int = Depends(get_current_user_id),
     title: Optional[str] = None,
     author: Optional[str] = None,
     category: Optional[str] = None,
-    year: Optional[int] = None,
+    year: Optional[str] = None,
     language: Optional[str] = None,
+    status: Optional[str] = None,
     query: Optional[str] = None,
     page: int = Query(1, ge=1, description="Номер сторінки (починається з 1)"),
     per_page: int = Query(
@@ -181,12 +177,6 @@ async def list_books(
         description="Кількість книг на сторінку (1-100)",
     ),
 ):
-
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-        )
 
     base_stmt = select(Book).outerjoin(Rating).group_by(Book.id)
 
@@ -200,6 +190,8 @@ async def list_books(
         base_stmt = base_stmt.where(Book.year.cast(String).ilike(f"%{year}%"))
     if language:
         base_stmt = base_stmt.where(Book.language.ilike(f"%{language}%"))
+    if status:
+        base_stmt = base_stmt.where(Book.status.cast(String).ilike(f"%{status}%"))
 
     if query:
         search_terms = query.split()

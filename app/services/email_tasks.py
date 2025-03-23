@@ -1,14 +1,19 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from typing import List
 
+from asgiref.sync import async_to_sync
+from sqlalchemy.engine import Result
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
 from app.dependencies.database import SessionLocal
 from app.models.book import BookStatus
 from app.models.reservation import Reservation, ReservationStatus
-from app.services.celery import celery_app
+from app.models.user import User
+from app.services.celery_config import celery_app
 from app.services.email_service import send_email
 
 logger = logging.getLogger(__name__)
@@ -69,7 +74,6 @@ def send_reservation_email(email: str, book: dict, expires_at: str):
             <p><strong>📅 Рік видання:</strong> {book["year"]}</p>
             <p><strong>📝 Опис:</strong> {book["description"]}</p>
             <hr>
-            <p><strong>⏳ Бронювання дійсне до:</strong> {expires_at}</p>
             <p>Будь ласка, очікуйте на підтвердження адміністратором.
             Як тільки бронювання буде підтверджене, ви отримаєте додатковий лист із деталями.</p>
             <br>
@@ -291,69 +295,183 @@ def send_welcome_email(user_email: str, user_name: str):
 
 
 @celery_app.task
-def check_and_cancel_expired_reservations():
-    """📌 Перевіряє прострочені бронювання (не забрали за 5 днів) та скасовує їх."""
-
-    async def task():
-        async with SessionLocal() as db:
-            now = datetime.now()
-
-            result = await db.execute(
-                select(Reservation)
-                .options(joinedload(Reservation.book), joinedload(Reservation.user))
-                .where(
-                    Reservation.expires_at < now,
-                    Reservation.status == ReservationStatus.CONFIRMED,
-                ),
-            )
-            expired_reservations = result.scalars().all()
-
-            for reservation in expired_reservations:
-                book = reservation.book
-                user = reservation.user
-
-                reservation.status = ReservationStatus.CANCELLED
-                book.status = BookStatus.AVAILABLE
-
-                # Надсилаємо e-mail
-                send_reservation_cancellation_email.delay(user.email, book.title)
-
-            await db.commit()
+def send_user_blocked_email(email: str, first_name: str):
+    subject = "🚫 Ваш акаунт заблоковано"
+    body = f"""
+    <html>
+        <body>
+            <h2 style="color: #D32F2F;">🚫 Акаунт тимчасово заблоковано</h2>
+            <p>Шановний {first_name},</p>
+            <p>Ваш акаунт був тимчасово заблокований через одну з наступних причин:</p>
+            <ul>
+                <li>📚 Ви маєте кілька книг з простроченим терміном повернення.</li>
+                <li>🔒 Підозріла активність з вашого акаунта.</li>
+            </ul>
+            <hr>
+            <p>Щоб відновити доступ, будь ласка, поверніть прострочені книги або зверніться до адміністратора бібліотеки.</p>
+            <p>Якщо у вас виникли питання, ми будемо раді допомогти.</p>
+            <br>
+            <p>📚 З повагою,<br><strong>Ваша бібліотека</strong></p>
+        </body>
+    </html>
+    """
 
     loop = asyncio.get_event_loop()
-    loop.create_task(task())
+    loop.create_task(send_email(email, subject, body, html=True))
+
+
+@celery_app.task
+def send_user_unblocked_email(user_email: str, first_name: str):
+    """📩 Лист після розблокування користувача бібліотекарем"""
+    subject = "🔓 Ваш акаунт розблоковано!"
+
+    body = f"""
+    <html>
+        <body>
+            <h2 style="color: #4CAF50;">🔓 Доступ до акаунта відновлено</h2>
+            <p>Шановний {first_name},</p>
+            <p>Ми раді повідомити, що ваш акаунт було успішно <strong>розблоковано</strong>.</p>
+            <hr>
+            <p>Тепер ви знову можете:</p>
+            <ul>
+                <li>📚 Бронювати книги</li>
+                <li>📖 Отримувати книги у тимчасове користування</li>
+                <li>🕓 Переглядати історію ваших бронювань</li>
+            </ul>
+            <hr>
+            <p>Будь ласка, дотримуйтеся правил користування бібліотекою, щоб уникнути блокування у майбутньому.</p>
+            <br>
+            <p>📚 З повагою,<br><strong>Ваша бібліотека</strong></p>
+        </body>
+    </html>
+    """
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(send_email(user_email, subject, body, html=True))
 
 
 @celery_app.task
 def check_and_send_return_reminders():
-    """📌 Надсилає нагадування за 3 дні до закінчення терміну користування книгою."""
+    print("✅ check_and_send_return_reminders started!")
 
-    async def task():
-        async with SessionLocal() as db:
-            now = datetime.now()
-            reminder_date = now + timedelta(days=3)
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-            result = await db.execute(
-                select(Reservation)
-                .options(joinedload(Reservation.book), joinedload(Reservation.user))
-                .where(
-                    Reservation.expires_at == reminder_date,
-                    Reservation.status == ReservationStatus.CONFIRMED,
+    loop.run_until_complete(_check_and_send_return_reminders())
+
+
+async def _check_and_send_return_reminders():
+    async with SessionLocal() as db:
+        now = datetime.now()
+        reminder_date = now + timedelta(days=3)
+
+        result = await db.execute(
+            select(Reservation)
+            .options(joinedload(Reservation.book), joinedload(Reservation.user))
+            .where(
+                Reservation.expires_at.between(
+                    reminder_date - timedelta(seconds=30),
+                    reminder_date + timedelta(seconds=30),
                 ),
+                Reservation.status == ReservationStatus.ACTIVE,
+            ),
+        )
+        reservations = result.scalars().all()
+        print(f"🔔 Знайдено {len(reservations)} резервацій для нагадування")
+
+        for reservation in reservations:
+            book = reservation.book
+            user = reservation.user
+
+            send_return_reminder_email.delay(
+                user.email,
+                book.title,
+                reservation.expires_at.strftime("%Y-%m-%d"),
             )
-            reservations = result.scalars().all()
 
-            for reservation in reservations:
-                book = reservation.book
-                user = reservation.user
+        await db.commit()
 
-                send_return_reminder_email.delay(
-                    user.email,
-                    book.title,
-                    reservation.expires_at.strftime("%Y-%m-%d"),
+
+@celery_app.task
+def check_and_cleanup_reservations():
+    print("✅check_and_cleanup_reservations started!")
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(_check_and_cleanup_reservations())
+
+
+async def _check_and_cleanup_reservations():
+    async with SessionLocal() as db:
+        now = datetime.now()
+
+        # 1. Не забрали книгу (CONFIRMED → CANCELLED)
+        result: Result = await db.execute(
+            select(Reservation)
+            .options(joinedload(Reservation.book), joinedload(Reservation.user))
+            .where(
+                Reservation.expires_at < now,
+                Reservation.status == ReservationStatus.CONFIRMED,
+            ),
+        )
+
+        to_cancel: List[Reservation] = result.scalars().all()
+        print(f"[CLEANUP] 🔔 Знайдено {len(to_cancel)} резервацій для скасування")
+
+        for r in to_cancel:
+            r.status = ReservationStatus.CANCELLED
+            r.book.status = BookStatus.AVAILABLE
+            await db.flush()
+            send_reservation_cancellation_email.delay(r.user.email, r.book.title)
+
+        # 2. Не повернули книгу (ACTIVE → EXPIRED, OVERDUE)
+        result2: Result = await db.execute(
+            select(Reservation)
+            .options(joinedload(Reservation.book), joinedload(Reservation.user))
+            .where(
+                Reservation.expires_at < now,
+                Reservation.status == ReservationStatus.ACTIVE,
+            ),
+        )
+        to_expire: List[Reservation] = result2.scalars().all()
+
+        for r in to_expire:
+            r.status = ReservationStatus.EXPIRED
+            r.book.status = BookStatus.OVERDUE
+            await db.flush()
+            logger.info(f"[OVERDUE] Book '{r.book.title}' → user: {r.user.email}")
+
+        # 3. Блокуємо користувачів з 2+ OVERDUE
+        result3: Result = await db.execute(
+            select(User).options(
+                joinedload(User.reservations).joinedload(Reservation.book),
+            ),
+        )
+        users: List[User] = result3.unique().scalars().all()
+
+        for user in users:
+            count = sum(
+                1
+                for r in user.reservations
+                if r.book and r.book.status == BookStatus.OVERDUE
+            )
+            if count >= 2 and not user.is_blocked:
+                user.is_blocked = True
+                await db.flush()
+                logger.warning(
+                    f"[BLOCKED] {user.email} через {count} прострочених книг",
                 )
+                send_user_blocked_email.delay(user.email, count)
 
-            await db.commit()
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(task())
+        await db.commit()

@@ -121,7 +121,7 @@ async def create_reservation(
         book_id=book.id,
         user_id=user_id,
         status=ReservationStatus.PENDING,
-        expires_at=datetime.now() + timedelta(days=5),
+        expires_at=datetime.now() + timedelta(minutes=5),  # зміна
     )
 
     book.status = BookStatus.RESERVED
@@ -458,10 +458,10 @@ async def confirm_book_return_by_librarian(
         )
 
     # Перевіряємо, чи книга була видана читачеві
-    if book.status != BookStatus.CHECKED_OUT:
+    if book.status not in {BookStatus.CHECKED_OUT, BookStatus.OVERDUE}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This book is not currently checked out.",
+            detail="This book is not currently checked out or overdue.",
         )
 
     # Оновлення статусу книги та бронювання

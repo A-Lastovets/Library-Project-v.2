@@ -1,9 +1,10 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import String, and_, or_
+from sqlalchemy import String, and_, desc, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql import func
 
 from app.dependencies.database import get_db
@@ -83,7 +84,7 @@ async def update_book(
 
 
 @router.delete(
-    "/{book_id}",
+    "/",
     response_model=BulkUpdateResponse,
     status_code=status.HTTP_200_OK,
 )
@@ -265,16 +266,31 @@ async def get_user_books_by_status(
         description="Фільтр за статусом книги (AVAILABLE, RESERVED, CHECKED_OUT, OVERDUE)",
     ),
 ):
-    """📚 Отримання книг користувача (тільки тих, які він забронював чи взяв) з можливістю фільтрації."""
+
+    # Використовуємо підзапит, щоб отримати останню резервацію кожної книги
+    subquery = (
+        select(
+            Reservation.book_id,
+            func.max(Reservation.created_at).label("max_created_at"),
+        )
+        .where(Reservation.user_id == user_id)
+        .group_by(Reservation.book_id)
+        .subquery()
+    )
+
+    r_alias = aliased(Reservation)
 
     query = (
         select(Book)
-        .join(Reservation, Book.id == Reservation.book_id)
-        .where(Reservation.user_id == user_id)
+        .join(r_alias, Book.id == r_alias.book_id)
+        .join(
+            subquery,
+            (subquery.c.book_id == r_alias.book_id)
+            & (subquery.c.max_created_at == r_alias.created_at),
+        )
     )
 
-    # Фільтр за статусом, якщо він переданий
-    if status is not None:
+    if status:
         query = query.where(Book.status == status)
 
     result = await db.execute(query)

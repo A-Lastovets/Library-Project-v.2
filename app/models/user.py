@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, Column, Enum, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.dependencies.database import Base
+from app.models.rating import Rating
 
 
 class UserRole(str, PyEnum):

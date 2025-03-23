@@ -23,7 +23,12 @@ from app.schemas.schemas import (
     UserCreate,
     UserResponse,
 )
-from app.services.email_tasks import send_password_reset_email, send_welcome_email
+from app.services.email_tasks import (
+    send_password_reset_email,
+    send_user_blocked_email,
+    send_user_unblocked_email,
+    send_welcome_email,
+)
 from app.services.user_service import (
     authenticate_user,
     get_user_by_email,
@@ -288,6 +293,8 @@ async def block_users(
 
     await db.commit()
 
+    send_user_blocked_email(user.email, user.first_name)
+
     return BulkUpdateResponse(
         message="Users blocked successfully",
         updated_items=[user.id for user in users_to_block],
@@ -335,6 +342,8 @@ async def unblock_users(
         user.is_blocked = False
 
     await db.commit()
+
+    send_user_unblocked_email(user.email, user.first_name)
 
     return BulkUpdateResponse(
         message="Users unblocked successfully",

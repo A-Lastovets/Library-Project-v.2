@@ -25,7 +25,7 @@ class Book(Base):
     category = Column(String, nullable=False, index=True)
     language = Column(String, nullable=False, index=True)
     description = Column(String, nullable=False)
-    cover_image = Column(String, nullable=True)
+    cover_image = Column(String, nullable=False)
     status = Column(SAEnum(BookStatus), default=BookStatus.AVAILABLE, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

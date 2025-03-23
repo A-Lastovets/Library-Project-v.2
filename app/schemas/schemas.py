@@ -110,7 +110,7 @@ class BookBase(BaseSchema):
     category: str
     language: str
     description: Optional[str] = None
-    cover_image: Optional[str] = None
+    cover_image: str
 
 
 class BookCreate(BookBase):

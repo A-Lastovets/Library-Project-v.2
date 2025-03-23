@@ -75,7 +75,7 @@ async def create_reservation(
     )
     checked_out_books_count = result2.scalar()
 
-    if active_reservations_count + checked_out_books_count >= 3:
+    if active_reservations_count + checked_out_books_count == 3:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You have reached the limit of 3 active reservations or borrowed books."
@@ -121,7 +121,7 @@ async def create_reservation(
         book_id=book.id,
         user_id=user_id,
         status=ReservationStatus.PENDING,
-        expires_at=datetime.now() + timedelta(minutes=5),  # зміна
+        expires_at=datetime.now() + timedelta(days=5),
     )
 
     book.status = BookStatus.RESERVED
@@ -209,7 +209,7 @@ async def confirm_reservation_by_librarian(
     send_reservation_confirmation_email(
         reservation.user.email,
         BookResponse.model_validate(book).model_dump(),
-        reservation.expires_at.strftime("%Y-%m-%d"),
+        reservation.expires_at.strftime("%Y-%m-%d %H:%M"),
     )
 
     # Логування підтвердження бронювання
@@ -272,7 +272,7 @@ async def confirm_book_checkout_by_librarian(
     send_book_checked_out_email(
         reservation.user.email,
         book.title,
-        reservation.expires_at.strftime("%Y-%m-%d"),
+        reservation.expires_at.strftime("%Y-%m-%d %H:%M"),
     )
 
     # Логування підтвердження видачі книги

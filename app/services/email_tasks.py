@@ -237,7 +237,8 @@ def send_reservation_cancellation_email(user_email: str, book_title: str):
 
 @celery_app.task
 def send_return_reminder_email(user_email: str, book_title: str, due_date: str):
-    """📩 Лист-нагадування за 3 дні до повернення книги"""
+    """📩 Лист-нагадування про повернення книги"""
+
     subject = "📅 Нагадування про повернення книги"
 
     body = f"""
@@ -258,8 +259,16 @@ def send_return_reminder_email(user_email: str, book_title: str, due_date: str):
     </html>
     """
 
-    loop = asyncio.get_event_loop()
-    loop.create_task(send_email(user_email, subject, body, html=True))
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    print(f"📨 Надсилаю лист-нагадування для {user_email} на {due_date}")
+    loop.run_until_complete(send_email(user_email, subject, body, html=True))
 
 
 @celery_app.task
@@ -384,14 +393,11 @@ async def _check_and_send_return_reminders():
         reservations = result.scalars().all()
         print(f"🔔 Знайдено {len(reservations)} резервацій для нагадування")
 
-        for reservation in reservations:
-            book = reservation.book
-            user = reservation.user
-
+        for r in reservations:
             send_return_reminder_email.delay(
-                user.email,
-                book.title,
-                reservation.expires_at.strftime("%Y-%m-%d"),
+                r.user.email,
+                r.book.title,
+                r.expires_at.strftime("%Y-%m-%d %H:%M"),
             )
 
         await db.commit()
@@ -427,7 +433,7 @@ async def _check_and_cleanup_reservations():
         )
 
         to_cancel: List[Reservation] = result.scalars().all()
-        print(f"[CLEANUP] 🔔 Знайдено {len(to_cancel)} резервацій для скасування")
+        print(f"🔔 [CLEANUP] Знайдено {len(to_cancel)} резервацій для скасування")
 
         for r in to_cancel:
             r.status = ReservationStatus.CANCELLED
@@ -450,7 +456,7 @@ async def _check_and_cleanup_reservations():
             r.status = ReservationStatus.EXPIRED
             r.book.status = BookStatus.OVERDUE
             await db.flush()
-            logger.info(f"[OVERDUE] Book '{r.book.title}' → user: {r.user.email}")
+            logger.info(f"❌ [OVERDUE] Book '{r.book.title}' → user: {r.user.email}")
 
         # 3. Блокуємо користувачів з 2+ OVERDUE
         result3: Result = await db.execute(
@@ -470,8 +476,8 @@ async def _check_and_cleanup_reservations():
                 user.is_blocked = True
                 await db.flush()
                 logger.warning(
-                    f"[BLOCKED] {user.email} через {count} прострочених книг",
+                    f"❌ [BLOCKED] {user.email} через {count} прострочених книг",
                 )
-                send_user_blocked_email.delay(user.email, count)
+                send_user_blocked_email.delay(user.email, user.first_name)
 
         await db.commit()

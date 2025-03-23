@@ -21,11 +21,11 @@ celery_app.conf.update(
     beat_schedule={
         "check_all_reservations": {
             "task": "app.services.email_tasks.check_and_cleanup_reservations",
-            "schedule": crontab(minute="*/2"),
+            "schedule": crontab(minute=0, hour=0),
         },
         "send-return-reminders": {
             "task": "app.services.email_tasks.check_and_send_return_reminders",
-            "schedule": crontab(minute="*/2"),
+            "schedule": crontab(minute=0, hour="*/2"),
         },
     },
 )

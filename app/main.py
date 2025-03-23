@@ -57,4 +57,4 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(crud_books.router, prefix="/api/v1")
 app.include_router(crud_reservation.router, prefix="/api/v1")
 
-logger.info("Library API успішно запущено!")
+logger.info("✅ Library API успішно запущено!")

@@ -81,7 +81,7 @@ async def check_and_block_user(db: AsyncSession, user_id: int):
 
     if overdue_books_count >= 2:
         user.is_blocked = True
-        await db.commit()  # Оновлюємо статус у базі
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are blocked due to overdue books. Contact the librarian to unblock.",

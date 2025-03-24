@@ -7,7 +7,7 @@ def setup_middlewares(app):
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if config.FRONTEND_URL == "*" else [config.FRONTEND_URL],
+        allow_origins=config.allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],  # Дозволяє всі HTTP-методи
         allow_headers=["*"],  # Дозволяє всі заголовки

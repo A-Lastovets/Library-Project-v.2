@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy.sql import and_, func
 
 from app.dependencies.database import get_db
+from app.exceptions.pagination import paginate_response
 from app.models.book import Book, BookStatus
 from app.models.reservation import Reservation, ReservationStatus
 from app.schemas.schemas import BookResponse, ReservationCreate, ReservationResponse
@@ -292,7 +293,7 @@ async def decline_reservation_librarian(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
 ):
-    """Бібліотекар скасовує будь-яке бронювання."""
+    """Бібліотекар скасовує бронювання."""
 
     result = await db.execute(
         select(Reservation)
@@ -316,10 +317,10 @@ async def decline_reservation_librarian(
         )
 
     # Перевірка: не можна скасувати вже отриману книгу
-    if book.status == BookStatus.CHECKED_OUT:
+    if book.status in [BookStatus.CHECKED_OUT, BookStatus.OVERDUE]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This book is already checked out and cannot be cancelled. The user must return it first.",
+            detail="This book is already checked out or overdue and cannot be cancelled. The user must return it first.",
         )
 
     # Оновлення статусу книги та бронювання
@@ -385,10 +386,13 @@ async def decline_reservation_user(
         )
 
     # Заборона скасування, якщо книга вже `CHECKED_OUT`
-    if book.status == BookStatus.CHECKED_OUT:
+    if book.status in [BookStatus.CHECKED_OUT, BookStatus.OVERDUE]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot cancel this reservation because you have already taken the book. Please return it instead.",
+            detail=(
+                "You cannot cancel this reservation because the book has already been taken or is overdue. "
+                "Please return it instead."
+            ),
         )
 
     # Дозволяємо скасування тільки для `PENDING` або `CONFIRMED`
@@ -485,7 +489,7 @@ async def confirm_book_return_by_librarian(
     return reservation
 
 
-@router.get("/librarian/all", response_model=list[ReservationResponse])
+@router.get("/librarian/all", response_model=dict)
 async def get_reservations(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
@@ -493,33 +497,53 @@ async def get_reservations(
         None,
         description="Фільтр за статусом бронювання",
     ),
+    page: int = Query(1, ge=1, description="Номер сторінки"),
+    per_page: int = Query(10, ge=1, le=100, description="Кількість записів"),
 ):
-    """📄 Отримання всіх бронювань (тільки для бібліотекаря) з можливістю фільтрації за статусом."""
+    """📄 Отримання всіх бронювань (тільки для бібліотекаря) з можливістю фільтрації та пагінації."""
     query = select(Reservation).options(
         joinedload(Reservation.book),
         joinedload(Reservation.user),
     )
 
-    if status:  # Якщо передано параметр статусу, додаємо фільтр
+    if status is not None:
         query = query.where(Reservation.status == status)
 
-    result = await db.execute(query)
+    total_reservations = await db.scalar(
+        select(func.count()).select_from(query.subquery()),
+    )
+
+    result = await db.execute(
+        query.order_by(Reservation.created_at.desc())
+        .limit(per_page)
+        .offset((page - 1) * per_page),
+    )
     reservations = result.scalars().unique().all()
 
-    return reservations
+    return paginate_response(
+        total=total_reservations,
+        page=page,
+        per_page=per_page,
+        items=[ReservationResponse.model_validate(r) for r in reservations],
+    )
 
 
-@router.get("/user/all", response_model=list[ReservationResponse])
+@router.get("/user/all", response_model=dict)
 async def get_user_reservations(
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
-    status: Optional[ReservationStatus] = Query(
+    status: Optional[Literal["pending", "confirmed", "cancelled", "completed"]] = Query(
         None,
-        description="Фільтр за статусом бронювання (PENDING, CONFIRMED, CANCELLED, EXPIRED)",
+        description="Фільтр за статусом бронювання (PENDING, CONFIRMED, CANCELLED, COMPLETED)",
+    ),
+    page: int = Query(1, ge=1, description="Номер сторінки"),
+    per_page: int = Query(
+        10,
+        ge=1,
+        le=100,
+        description="Кількість записів на сторінку",
     ),
 ):
-    """Отримання всіх активних бронювань користувача з можливістю фільтрації."""
-
     query = (
         select(Reservation)
         .options(
@@ -530,9 +554,23 @@ async def get_user_reservations(
     )
 
     if status is not None:
-        query = query.where(Reservation.status == status)
+        query = query.where(Reservation.status == ReservationStatus(status))
 
+    total_reservations = await db.scalar(
+        select(func.count()).select_from(query.subquery()),
+    )
+
+    query = (
+        query.order_by(Reservation.created_at.desc())
+        .limit(per_page)
+        .offset((page - 1) * per_page)
+    )
     result = await db.execute(query)
     reservations = result.scalars().unique().all()
 
-    return reservations
+    return paginate_response(
+        total=total_reservations,
+        page=page,
+        per_page=per_page,
+        items=[ReservationResponse.model_validate(r) for r in reservations],
+    )

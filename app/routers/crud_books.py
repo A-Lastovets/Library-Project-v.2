@@ -1,16 +1,20 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import String, and_, desc, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import aliased
 from sqlalchemy.sql import func
 
 from app.dependencies.database import get_db
+from app.exceptions.book_filters import apply_book_filters
+from app.exceptions.pagination import paginate_response
+from app.exceptions.serialization import (
+    serialize_book_with_reservation,
+    serialize_book_with_user_reservation,
+)
+from app.exceptions.subquery_reserv import get_latest_reservation_alias
 from app.models.book import Book, BookStatus
 from app.models.rating import Rating
-from app.models.reservation import Reservation
 from app.models.user import User
 from app.schemas.schemas import (
     BookCreate,
@@ -182,40 +186,16 @@ async def list_books(
 ):
 
     base_stmt = select(Book).outerjoin(Rating).group_by(Book.id)
-
-    if title:
-        base_stmt = base_stmt.where(Book.title.ilike(f"%{title}%"))
-    if author:
-        base_stmt = base_stmt.where(Book.author.ilike(f"%{author}%"))
-    if category:
-        base_stmt = base_stmt.where(Book.category.ilike(f"%{category}%"))
-    if year:
-        base_stmt = base_stmt.where(Book.year.cast(String).ilike(f"%{year}%"))
-    if language:
-        base_stmt = base_stmt.where(Book.language.ilike(f"%{language}%"))
-    if status:
-        base_stmt = base_stmt.where(Book.status.cast(String).ilike(f"%{status}%"))
-
-    if query:
-        search_terms = query.split()
-
-        search_conditions = and_(
-            *(
-                (
-                    Book.year == int(word)
-                    if word.isdigit()
-                    else or_(
-                        Book.title.ilike(f"%{word}%"),
-                        Book.author.ilike(f"%{word}%"),
-                        Book.category.ilike(f"%{word}%"),
-                        Book.language.ilike(f"%{word}%"),
-                    )
-                )
-                for word in search_terms
-            ),
-        )
-
-        base_stmt = base_stmt.where(search_conditions)
+    base_stmt = apply_book_filters(
+        base_stmt,
+        title,
+        author,
+        category,
+        year,
+        language,
+        status,
+        query,
+    )
 
     # Отримуємо загальну кількість книг, які відповідають фільтрам
     total_books = await db.scalar(
@@ -235,147 +215,102 @@ async def list_books(
     result = await db.execute(stmt)
     books = result.fetchall()
 
-    return {
-        "total_books": total_books,
-        "total_pages": (total_books // per_page) + (1 if total_books % per_page else 0),
-        "current_page": page,
-        "per_page": per_page,
-        "books": [
-            {
-                "id": book.id,
-                "title": book.title,
-                "author": book.author,
-                "year": book.year,
-                "category": book.category,
-                "language": book.language,
-                "description": book.description,
-                "status": book.status.value,
-                "average_rating": round(float(average_rating), 1),
-                "coverImage": book.cover_image,
-            }
-            for book, average_rating in books
-        ],
-    }
+    book_list = [
+        {
+            "id": book.id,
+            "title": book.title,
+            "author": book.author,
+            "year": book.year,
+            "category": book.category,
+            "language": book.language,
+            "description": book.description,
+            "status": book.status.value,
+            "average_rating": round(float(average_rating), 1),
+            "coverImage": book.cover_image,
+        }
+        for book, average_rating in books
+    ]
+
+    return paginate_response(total_books, page, per_page, book_list)
 
 
 @router.get("/user/status", response_model=dict)
 async def get_books_by_status_user(
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
-    status: Optional[BookStatus] = Query(
+    status: Optional[Literal["checked_out", "overdue"]] = Query(
         None,
-        description="Фільтр за статусом книги (AVAILABLE, RESERVED, CHECKED_OUT, OVERDUE)",
+        description="Фільтр за статусом книги (checked_out, overdue)",
     ),
-    page: int = Query(1, ge=1, description="Номер сторінки"),
-    per_page: int = Query(10, ge=1, le=100, description="Кількість книг на сторінку"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=100),
 ):
-    # Показуємо всі книги з різними статусами, якщо фільтр не вказано
-    if status is None:
-        query = select(Book)
-        total_books = await db.scalar(select(func.count()).select_from(Book))
-        result = await db.execute(
-            query.order_by(Book.created_at.desc())
-            .limit(per_page)
-            .offset((page - 1) * per_page),
+    allowed_statuses = [BookStatus.CHECKED_OUT, BookStatus.OVERDUE]
+
+    if status and status not in allowed_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail="Only 'CHECKED_OUT' and 'OVERDUE' statuses are allowed for users.",
         )
-        books = result.scalars().unique().all()
 
-        return {
-            "total_books": total_books,
-            "total_pages": (total_books // per_page)
-            + (1 if total_books % per_page else 0),
-            "current_page": page,
-            "books": [BookResponse.model_validate(book) for book in books],
-        }
+    r_alias, subquery = get_latest_reservation_alias()
 
-    # Якщо статус — AVAILABLE, також показуємо всі доступні книги
-    if status == BookStatus.AVAILABLE:
-        query = select(Book).where(Book.status == BookStatus.AVAILABLE)
-        total_books = await db.scalar(
-            select(func.count())
-            .select_from(Book)
-            .where(Book.status == BookStatus.AVAILABLE),
-        )
-        result = await db.execute(
-            query.order_by(Book.created_at.desc())
-            .limit(per_page)
-            .offset((page - 1) * per_page),
-        )
-        books = result.scalars().unique().all()
-
-        return {
-            "total_books": total_books,
-            "total_pages": (total_books // per_page)
-            + (1 if total_books % per_page else 0),
-            "current_page": page,
-            "books": [BookResponse.model_validate(book) for book in books],
-        }
-
-    # Для інших статусів — книги, пов’язані з користувачем
-    subquery = (
-        select(
-            Reservation.book_id,
-            func.max(Reservation.created_at).label("max_created_at"),
-        )
-        .where(Reservation.user_id == user_id)
-        .group_by(Reservation.book_id)
-        .subquery()
-    )
-
-    r_alias = aliased(Reservation)
-
-    query = (
-        select(Book)
+    base_query = (
+        select(Book, r_alias)
         .join(r_alias, Book.id == r_alias.book_id)
         .join(
             subquery,
             (subquery.c.book_id == r_alias.book_id)
-            & (subquery.c.max_created_at == r_alias.created_at),
+            & (subquery.c.latest_created == r_alias.created_at),
         )
         .where(r_alias.user_id == user_id)
-        .where(Book.status == status)
     )
 
-    total_books = await db.scalar(select(func.count()).select_from(query.subquery()))
+    if status:
+        base_query = base_query.where(Book.status == status)
+    else:
+        base_query = base_query.where(Book.status.in_(allowed_statuses))
 
-    query = (
-        query.order_by(Book.created_at.desc())
+    total_books = await db.scalar(
+        select(func.count()).select_from(base_query.subquery()),
+    )
+    result = await db.execute(
+        base_query.order_by(Book.created_at.desc())
         .limit(per_page)
-        .offset((page - 1) * per_page)
+        .offset((page - 1) * per_page),
     )
-    result = await db.execute(query)
-    books = result.scalars().unique().all()
 
-    return {
-        "total_books": total_books,
-        "total_pages": (total_books // per_page) + (1 if total_books % per_page else 0),
-        "current_page": page,
-        "books": [BookResponse.model_validate(book) for book in books],
-    }
+    books = [
+        serialize_book_with_reservation(book, reservation)
+        for book, reservation in result.all()
+    ]
+
+    return paginate_response(total_books, page, per_page, books)
 
 
 @router.get("/librarian/status", response_model=dict)
 async def get_books_by_status_librarian(
     db: AsyncSession = Depends(get_db),
-    librarian: dict = Depends(librarian_required),
+    _: dict = Depends(librarian_required),
     status: Optional[BookStatus] = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
 ):
-    subquery = (
-        select(
-            Reservation.book_id,
-            func.max(Reservation.created_at).label("latest_created"),
-        )
-        .group_by(Reservation.book_id)
-        .subquery()
-    )
-
-    r_alias = aliased(Reservation)
+    r_alias, subquery = get_latest_reservation_alias()
 
     if status is None:
-        # Всі книги з усіма статусами, додаємо дані користувача та бронювання
-        book_query = (
+        # Всі книги — спочатку отримаємо список ID для поточної сторінки
+        book_ids_stmt = (
+            select(Book.id)
+            .order_by(Book.created_at.desc())
+            .limit(per_page)
+            .offset((page - 1) * per_page)
+        )
+        book_ids_result = await db.execute(book_ids_stmt)
+        book_ids = [row[0] for row in book_ids_result.fetchall()]
+
+        # Дані книг
+        book_details_stmt = (
             select(Book, r_alias, User)
             .join(r_alias, Book.id == r_alias.book_id)
             .join(User, r_alias.user_id == User.id)
@@ -384,59 +319,41 @@ async def get_books_by_status_librarian(
                 (subquery.c.book_id == r_alias.book_id)
                 & (subquery.c.latest_created == r_alias.created_at),
             )
+            .where(Book.id.in_(book_ids))
         )
-
-        result_books = await db.execute(
-            select(Book)
-            .order_by(Book.created_at.desc())
-            .limit(per_page)
-            .offset((page - 1) * per_page),
-        )
-        all_books = result_books.scalars().unique().all()
-
-        # Створюємо мапу останніх резервацій
-        result_details = await db.execute(book_query)
+        reservation_data = await db.execute(book_details_stmt)
         reservation_map = {
-            book.id: {"reservation": res, "user": usr}
-            for book, res, usr in result_details.all()
+            book.id: (res, usr) for book, res, usr in reservation_data.all()
         }
 
-        total_books = await db.scalar(select(func.count()).select_from(Book))
+        # Отримуємо самі книги
+        books_result = await db.execute(select(Book).where(Book.id.in_(book_ids)))
+        all_books = books_result.scalars().unique().all()
 
         books = []
         for book in all_books:
-            book_info = {
-                "id": book.id,
-                "title": book.title,
-                "author": book.author,
-                "year": book.year,
-                "category": book.category,
-                "language": book.language,
-                "description": book.description,
-                "status": book.status.value,
-                "coverImage": book.cover_image,
-            }
-
             if book.status != BookStatus.AVAILABLE and book.id in reservation_map:
-                data = reservation_map[book.id]
-                book_info.update(
+                res, usr = reservation_map[book.id]
+                books.append(serialize_book_with_user_reservation(book, res, usr))
+            else:
+                books.append(
                     {
-                        "user": {
-                            "id": data["user"].id,
-                            "first_name": data["user"].first_name,
-                            "last_name": data["user"].last_name,
-                            "email": data["user"].email,
-                        },
-                        "reservation_status": data["reservation"].status.value,
-                        "reservation_date": data["reservation"].created_at,
-                        "expires_at": data["reservation"].expires_at,
+                        "id": book.id,
+                        "title": book.title,
+                        "author": book.author,
+                        "year": book.year,
+                        "category": book.category,
+                        "language": book.language,
+                        "description": book.description,
+                        "status": book.status.value,
+                        "coverImage": book.cover_image,
                     },
                 )
 
-            books.append(book_info)
+        total_books = await db.scalar(select(func.count()).select_from(Book))
 
     elif status == BookStatus.AVAILABLE:
-        # Тільки доступні книги (без користувача)
+        # Доступні книги — без юзера
         query = select(Book).where(Book.status == BookStatus.AVAILABLE)
         total_books = await db.scalar(
             select(func.count()).select_from(query.subquery()),
@@ -462,7 +379,7 @@ async def get_books_by_status_librarian(
         ]
 
     else:
-        # Книги з конкретним статусом, з користувачем і резервацією
+        # Книги з конкретним статусом, з резервацією і юзером
         query = (
             select(Book, r_alias, User)
             .join(r_alias, Book.id == r_alias.book_id)
@@ -474,7 +391,6 @@ async def get_books_by_status_librarian(
             )
             .where(Book.status == status)
         )
-
         total_books = await db.scalar(
             select(func.count()).select_from(query.subquery()),
         )
@@ -484,37 +400,12 @@ async def get_books_by_status_librarian(
             .offset((page - 1) * per_page),
         )
 
-        books = []
-        for book, reservation, user in result.all():
-            books.append(
-                {
-                    "id": book.id,
-                    "title": book.title,
-                    "author": book.author,
-                    "year": book.year,
-                    "category": book.category,
-                    "language": book.language,
-                    "description": book.description,
-                    "status": book.status.value,
-                    "coverImage": book.cover_image,
-                    "user": {
-                        "id": user.id,
-                        "first_name": user.first_name,
-                        "last_name": user.last_name,
-                        "email": user.email,
-                    },
-                    "reservation_status": reservation.status.value,
-                    "reservation_date": reservation.created_at,
-                    "expires_at": reservation.expires_at,
-                },
-            )
+        books = [
+            serialize_book_with_user_reservation(book, reservation, user)
+            for book, reservation, user in result.all()
+        ]
 
-    return {
-        "total_books": total_books,
-        "total_pages": (total_books // per_page) + (1 if total_books % per_page else 0),
-        "current_page": page,
-        "books": books,
-    }
+    return paginate_response(total_books, page, per_page, books)
 
 
 @router.post("/rate/{book_id}", status_code=status.HTTP_200_OK)

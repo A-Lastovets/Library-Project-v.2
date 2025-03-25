@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from app.config import LogConfig
 from app.dependencies.cache import redis_client
-from app.dependencies.database import Base, SessionLocal, engine
+from app.dependencies.database import SessionLocal, init_db
 from app.middlewares.middlewares import setup_middlewares
 from app.roles import create_admin
 from app.routers import auth, crud_books, crud_reservation
@@ -20,8 +20,7 @@ async def lifespan(app: FastAPI):
     """Управління ресурсами під час життєвого циклу API"""
 
     try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)  # Створення таблиць БД
+        await init_db()  # Створення таблиць БД
 
         async with SessionLocal() as db:
             await create_admin(db)  # Створення адміна

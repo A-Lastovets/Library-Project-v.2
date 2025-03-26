@@ -24,7 +24,7 @@ class FrontendSettings(BaseSettings):
 
     @property
     def allowed_origins(self) -> list[str]:
-        return [url.strip() for url in self.FRONTEND_URLS.split(",")]
+        return [url.strip() for url in self.FRONTEND_URL.split(",")]
 
 
 class RedisSettings(BaseSettings):

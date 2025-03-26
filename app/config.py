@@ -21,11 +21,17 @@ class AuthSettings(BaseSettings):
 
 class FrontendSettings(BaseSettings):
     FRONTEND_URL: str
+    FRONTEND_URL_FOR_LINKS: str
 
     @property
     def allowed_origins(self) -> list[str]:
         return [url.strip() for url in self.FRONTEND_URL.split(",")]
 
+    @property
+    def frontend_url_for_links(self) -> str:
+        # Наприклад, використовуємо перший домен із списку для email-ссила
+        return self.FRONTEND_URL_FOR_LINKS.split(",")[0]
+        
 
 class RedisSettings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = None

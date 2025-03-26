@@ -22,6 +22,10 @@ class AuthSettings(BaseSettings):
 class FrontendSettings(BaseSettings):
     FRONTEND_URL: str
 
+    @property
+    def allowed_origins(self) -> list[str]:
+        return [url.strip() for url in self.FRONTEND_URLS.split(",")]
+
 
 class RedisSettings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = None

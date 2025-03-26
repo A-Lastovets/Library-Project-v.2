@@ -6,7 +6,7 @@ from app.config import config
 
 
 def setup_middlewares(app):
-    allow_origins = ["*"] if config.FRONTEND_URL == "*" else [config.FRONTEND_URL]
+    allow_origins = config.allowed_origins,
     logging.info(f"Allowed CORS origins: {allow_origins}")
 
     app.add_middleware(

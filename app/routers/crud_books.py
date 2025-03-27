@@ -180,7 +180,7 @@ async def find_book(
         description=book.description,
         cover_image=book.cover_image,
         status=book.status,
-        average_rating=average_rating,
+        average_rating=round(float(average_rating), 1),
     )
 
 

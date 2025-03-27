@@ -1,11 +1,11 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy.sql import func
 from app.config import config
 from app.dependencies.cache import redis_client
 from app.dependencies.database import get_db
@@ -242,7 +242,6 @@ async def get_all_users(
     # Загальна кількість користувачів
     total_users = await db.scalar(select(func.count()).select_from(User))
 
-    # Пагінований вибір
     result = await db.execute(
         select(User)
         .order_by(User.id)

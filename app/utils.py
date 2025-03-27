@@ -58,7 +58,7 @@ def create_password_reset_token(email: str):
 
 
 # Єдина функція для декодування токенів (access і refresh)
-def decode_jwt_token(token: str):
+def decode_jwt_token(token: str, check_blocked: bool = False):
     """✅ Розшифровує JWT-токен та повертає всі його дані"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -84,8 +84,11 @@ def decode_jwt_token(token: str):
         if None in user_data.values():
             raise credentials_exception
 
-        if user_data["is_blocked"]:
-            raise HTTPException(status_code=403, detail="User is blocked")
+        if check_blocked and user_data["is_blocked"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account is blocked and cannot perform this action.",
+            )
 
         return user_data
 

@@ -3,9 +3,9 @@ import logging
 from datetime import datetime, timedelta
 from typing import List
 
-from asgiref.sync import async_to_sync
+from typing import Optional
 from sqlalchemy.engine import Result
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
@@ -117,9 +117,29 @@ def send_reservation_confirmation_email(email: str, book: dict, expires_at: str)
 
 
 @celery_app.task
-def send_reservation_cancelled_email(email: str, book_title: str):
+def send_reservation_cancelled_email(email: str, book_title: str, cancelled_by: Optional[str] = None):
     """📩 Лист після скасування бронювання"""
     subject = "⛔ Ваше бронювання скасовано"
+
+    if cancelled_by == "user":
+        reason_block = """
+        <ul>
+            <li>⏳ Ви вирішили самостійно відмінити бронювання.</li>
+        </ul>
+        """
+    elif cancelled_by == "librarian":
+        reason_block = """
+        <ul>
+            <li>📅 Адміністратор скасував бронювання з інших причин.</li>
+        </ul>
+        """
+    else:
+        reason_block = """
+        <ul>
+            <li>⏳ Ви вирішили самостійно відмінити бронювання.</li>
+            <li>📅 Адміністратор скасував бронювання з інших причин.</li>
+        </ul>
+        """
 
     body = f"""
     <html>
@@ -131,11 +151,8 @@ def send_reservation_cancelled_email(email: str, book_title: str):
             <h3>📖 {book_title}</h3>
             <p>🔹 <strong>Статус бронювання:</strong> Скасовано</p>
             <hr>
-            <p>Можливі причини скасування:</p>
-            <ul>
-                <li>⏳ Ви вирішили самостійно відмінити бронювання.</li>
-                <li>📅 Адміністратор скасував бронювання з інших причин.</li>
-            </ul>
+            <p>Причина скасування:</p>
+            {reason_block}
             <p>Якщо ви все ще бажаєте отримати цю книгу, ви можете зробити нове бронювання через наш каталог.</p>
             <br>
             <p>📚 Якщо у вас є запитання – звертайтеся до бібліотекарів.</p>

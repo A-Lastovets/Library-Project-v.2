@@ -122,13 +122,14 @@ async def delete_multiple_books(
     restricted_books = [
         book.id
         for book in books
-        if book.status in {BookStatus.RESERVED, BookStatus.CHECKED_OUT}
+        if book.status
+        in {BookStatus.RESERVED, BookStatus.CHECKED_OUT, BookStatus.OVERDUE}
     ]
 
     if restricted_books:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot delete books with IDs {restricted_books} as they are reserved or checked out.",
+            detail=f"Cannot delete books with IDs {restricted_books} as they are reserved, checked out or overdue.",
         )
 
     for book in books:
@@ -415,7 +416,7 @@ async def rate_book(
     db: AsyncSession = Depends(get_db),
     user_id: dict = Depends(get_current_user_id),
 ):
-    """⭐ Додати або оновити рейтинг книги"""
+    """Додати рейтинг книги (лише один раз)"""
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(
@@ -429,10 +430,13 @@ async def rate_book(
     existing_rating = result.scalars().first()
 
     if existing_rating:
-        existing_rating.rating = rating_data.rating  # Оновлюємо рейтинг
-    else:
-        new_rating = Rating(book_id=book_id, user_id=user_id, rating=rating_data.rating)
-        db.add(new_rating)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You have already rated this book",
+        )
+
+    new_rating = Rating(book_id=book_id, user_id=user_id, rating=rating_data.rating)
+    db.add(new_rating)
 
     await db.commit()
     return {"message": "Rating submitted successfully"}

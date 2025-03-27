@@ -44,43 +44,28 @@ async def create_reservation(
 
     await check_and_block_user(db, user_id)
 
-    # Перевіряємо активні бронювання та книги на руках
-    result1 = await db.execute(
+    result = await db.execute(
         select(func.count())
         .select_from(Reservation)
         .where(
-            and_(
-                Reservation.user_id == user_id,
-                Reservation.status.in_(
-                    [ReservationStatus.PENDING, ReservationStatus.CONFIRMED],
-                ),
+            Reservation.user_id == user_id,
+            Reservation.status.in_(
+                [
+                    ReservationStatus.PENDING,
+                    ReservationStatus.CONFIRMED,
+                    ReservationStatus.ACTIVE,
+                    ReservationStatus.EXPIRED,
+                ],
             ),
         ),
     )
-    active_reservations_count = result1.scalar()
+    total_relevant_reservations = result.scalar()
 
-    result2 = await db.execute(
-        select(func.count())
-        .select_from(Book)
-        .where(
-            and_(
-                Book.id.in_(
-                    select(Reservation.book_id).where(
-                        Reservation.user_id == user_id,
-                        Reservation.status == ReservationStatus.CONFIRMED,
-                    ),
-                ),
-                Book.status == BookStatus.CHECKED_OUT,
-            ),
-        ),
-    )
-    checked_out_books_count = result2.scalar()
-
-    if active_reservations_count + checked_out_books_count == 3:
+    if total_relevant_reservations >= 3:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You have reached the limit of 3 active reservations or borrowed books."
-            " Cancel a reservation or return a book before making a new reservation.",
+            detail="You can have up to 3 active or pending reservations in total. "
+            "Please complete or cancel an existing one to proceed.",
         )
 
     # Отримуємо книгу
@@ -326,6 +311,7 @@ async def decline_reservation_librarian(
     # Оновлення статусу книги та бронювання
     book.status = BookStatus.AVAILABLE  # Книга знову доступна
     reservation.status = ReservationStatus.CANCELLED  # Бронювання скасовано
+    reservation.cancelled_by = "librarian"
 
     await db.commit()
     await db.refresh(reservation, ["book", "user"])
@@ -334,6 +320,7 @@ async def decline_reservation_librarian(
     send_reservation_cancelled_email(
         reservation.user.email,
         book.title,
+        cancelled_by="librarian"
     )
 
     # Логування скасування
@@ -408,6 +395,7 @@ async def decline_reservation_user(
     # **Оновлення статусу бронювання та книги**
     book.status = BookStatus.AVAILABLE
     reservation.status = ReservationStatus.CANCELLED
+    reservation.cancelled_by = "user"
 
     await db.commit()
     await db.refresh(
@@ -419,6 +407,7 @@ async def decline_reservation_user(
     send_reservation_cancelled_email(
         reservation.user.email,
         book.title,
+        cancelled_by="user"
     )
 
     # Логування події
@@ -550,7 +539,10 @@ async def get_user_reservations(
             joinedload(Reservation.book),
             joinedload(Reservation.user),
         )
-        .where(Reservation.user_id == user_id)
+        .where(
+            Reservation.user_id == user_id,
+            Reservation.status != ReservationStatus.ACTIVE,
+        )
     )
 
     if status is not None:

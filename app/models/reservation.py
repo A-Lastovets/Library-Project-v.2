@@ -1,8 +1,16 @@
 from enum import Enum as PyEnum
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import (
+    Column,
+    DateTime,
+)
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import ForeignKey, Integer, func
+from sqlalchemy import (
+    ForeignKey,
+    Integer,
+    String,
+    func,
+)
 from sqlalchemy.orm import relationship
 
 from app.dependencies.database import Base
@@ -35,6 +43,11 @@ class Reservation(Base):
         SAEnum(ReservationStatus),
         default=ReservationStatus.PENDING,
         nullable=False,
+    )
+    cancelled_by = Column(
+        String,
+        nullable=True,
+        doc="Decline reservation: 'user' or 'librarian'",
     )
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=False)

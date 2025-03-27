@@ -1,11 +1,12 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
+
 from app.config import config
 from app.dependencies.cache import redis_client
 from app.dependencies.database import get_db
@@ -176,6 +177,7 @@ async def request_password_reset(
     )
 
     reset_link = f"{config.frontend_url_for_links}/auth/reset-password?token={token}"
+
     send_password_reset_email(user.email, reset_link)
 
     return response_message
@@ -235,18 +237,21 @@ async def get_all_users(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
     page: int = Query(1, ge=1, description="Номер сторінки"),
-    per_page: int = Query(10, ge=1, le=100, description="Кількість записів на сторінку"),
+    per_page: int = Query(
+        10,
+        ge=1,
+        le=100,
+        description="Кількість записів на сторінку",
+    ),
 ):
     """📋 Отримати всіх користувачів з пагінацією (тільки для librarian)."""
 
     # Загальна кількість користувачів
     total_users = await db.scalar(select(func.count()).select_from(User))
 
+    # Пагінований вибір
     result = await db.execute(
-        select(User)
-        .order_by(User.id)
-        .limit(per_page)
-        .offset((page - 1) * per_page)
+        select(User).order_by(User.id).limit(per_page).offset((page - 1) * per_page),
     )
     users = result.scalars().all()
 

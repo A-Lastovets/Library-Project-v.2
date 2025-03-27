@@ -320,7 +320,7 @@ async def decline_reservation_librarian(
     send_reservation_cancelled_email(
         reservation.user.email,
         book.title,
-        cancelled_by="librarian"
+        cancelled_by="librarian",
     )
 
     # Логування скасування
@@ -407,7 +407,7 @@ async def decline_reservation_user(
     send_reservation_cancelled_email(
         reservation.user.email,
         book.title,
-        cancelled_by="user"
+        cancelled_by="user",
     )
 
     # Логування події

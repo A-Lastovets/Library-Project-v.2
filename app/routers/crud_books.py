@@ -163,13 +163,14 @@ async def find_book(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Book not found",
         )
-    rating_result = await db.execute(
-        select(func.coalesce(func.avg(Rating.rating), 0.0))
-        .where(Rating.book_id == book_id)
-    )
-    average_rating = rating_result.scalar()  # Отримуємо середній рейтинг
 
-    # Повертаємо відповідь у потрібному форматі
+    rating_result = await db.execute(
+        select(func.coalesce(func.avg(Rating.rating), 0.0)).where(
+            Rating.book_id == book_id,
+        ),
+    )
+    average_rating = rating_result.scalar()
+
     return BookResponse(
         id=book.id,
         title=book.title,

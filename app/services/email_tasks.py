@@ -1,11 +1,9 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 
-from typing import Optional
 from sqlalchemy.engine import Result
-
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
@@ -117,7 +115,11 @@ def send_reservation_confirmation_email(email: str, book: dict, expires_at: str)
 
 
 @celery_app.task
-def send_reservation_cancelled_email(email: str, book_title: str, cancelled_by: Optional[str] = None):
+def send_reservation_cancelled_email(
+    email: str,
+    book_title: str,
+    cancelled_by: Optional[str] = None,
+):
     """📩 Лист після скасування бронювання"""
     subject = "⛔ Ваше бронювання скасовано"
 

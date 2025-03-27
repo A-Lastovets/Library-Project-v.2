@@ -33,5 +33,4 @@ class RedisClient:
             self.redis = None  # Важливо очистити змінну
 
 
-# 🔹 Глобальний екземпляр Redis-клієнта
 redis_client = RedisClient()

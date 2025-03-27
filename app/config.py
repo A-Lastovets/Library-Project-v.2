@@ -31,7 +31,7 @@ class FrontendSettings(BaseSettings):
     def frontend_url_for_links(self) -> str:
         # Наприклад, використовуємо перший домен із списку для email-ссила
         return self.FRONTEND_URL_FOR_LINKS.split(",")[0]
-        
+
 
 class RedisSettings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = None

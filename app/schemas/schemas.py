@@ -153,6 +153,7 @@ class ReservationResponse(BaseModel):
     book: Optional[BookBase] = None
     user: UserResponse
     status: ReservationStatus
+    cancelled_by: Optional[str] = None
     created_at: datetime
     expires_at: datetime
 

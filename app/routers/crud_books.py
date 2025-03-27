@@ -433,7 +433,7 @@ async def rate_book(
     book_id: int,
     rating_data: RateBook,
     db: AsyncSession = Depends(get_db),
-    user_id: dict = Depends(get_active_user_id),
+    user_id: dict = Depends(get_current_user_id),
 ):
     """Додати рейтинг книги (лише один раз)"""
     book = await db.get(Book, book_id)

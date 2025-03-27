@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 async def create_reservation(
     reservation_data: ReservationCreate,
     db: AsyncSession = Depends(get_db),
-    user_id: int = Depends(get_active_user_id),
+    user_id: int = Depends(get_current_user_id),
 ):
 
     await check_and_block_user(db, user_id)

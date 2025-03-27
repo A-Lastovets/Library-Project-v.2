@@ -230,17 +230,34 @@ async def reset_password(
 
 
 # Отримати всіх користувачів (тільки для librarian)
-@router.get("/users", response_model=list[UserResponse], status_code=status.HTTP_200_OK)
+@router.get("/users", response_model=dict, status_code=status.HTTP_200_OK)
 async def get_all_users(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
+    page: int = Query(1, ge=1, description="Номер сторінки"),
+    per_page: int = Query(10, ge=1, le=100, description="Кількість записів на сторінку"),
 ):
-    """Отримати всіх користувачів (тільки для librarian)."""
+    """📋 Отримати всіх користувачів з пагінацією (тільки для librarian)."""
 
-    result = await db.execute(select(User))
+    # Загальна кількість користувачів
+    total_users = await db.scalar(select(func.count()).select_from(User))
+
+    # Пагінований вибір
+    result = await db.execute(
+        select(User)
+        .order_by(User.id)
+        .limit(per_page)
+        .offset((page - 1) * per_page)
+    )
     users = result.scalars().all()
 
-    return [UserResponse.model_validate(user) for user in users]
+    return {
+        "total_users": total_users,
+        "total_pages": (total_users // per_page) + (1 if total_users % per_page else 0),
+        "current_page": page,
+        "per_page": per_page,
+        "items": [UserResponse.model_validate(user) for user in users],
+    }
 
 
 @router.patch("/users/block", response_model=BulkUpdateResponse)

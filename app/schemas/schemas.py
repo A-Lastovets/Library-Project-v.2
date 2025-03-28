@@ -11,7 +11,7 @@ from app.models.user import UserRole
 from app.oauth2 import validate_password_schema
 
 
-# ✅ Базова схема для автоматичної конвертації в camelCase
+# Базова схема для автоматичної конвертації в camelCase
 class BaseSchema(BaseModel):
     class Config:
         @staticmethod
@@ -97,6 +97,27 @@ class PasswordReset(BaseSchema):
     @classmethod
     def validate_new_password(cls, new_password: str):
         return validate_password_schema(new_password)
+
+
+class PasswordChange(BaseSchema):
+    old_password: str
+    new_password: str
+    confirm_new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, new_password: str):
+        return validate_password_schema(new_password)
+
+    @field_validator("confirm_new_password")
+    @classmethod
+    def passwords_match(cls, confirm_new_password: str, values):
+        if (
+            values.data.get("new_password")
+            and confirm_new_password != values.data["new_password"]
+        ):
+            raise ValueError("New passwords do not match")
+        return confirm_new_password
 
 
 class BookBase(BaseSchema):

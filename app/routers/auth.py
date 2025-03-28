@@ -16,6 +16,7 @@ from app.schemas.schemas import (
     BulkUpdateRequest,
     BulkUpdateResponse,
     LoginRequest,
+    PasswordChange,
     PasswordReset,
     PasswordResetRequest,
     Token,
@@ -23,6 +24,7 @@ from app.schemas.schemas import (
     UserResponse,
 )
 from app.services.email_tasks import (
+    send_password_changed_email,
     send_password_reset_email,
     send_user_blocked_email,
     send_user_unblocked_email,
@@ -30,8 +32,10 @@ from app.services.email_tasks import (
 )
 from app.services.user_service import (
     authenticate_user,
+    get_current_user_id,
     get_user_by_email,
     librarian_required,
+    pwd_context,
 )
 from app.utils import (
     create_access_token,
@@ -185,7 +189,7 @@ async def request_password_reset(
         user.email,
     )
 
-    reset_link = f"{config.frontend_url_for_links}/auth/reset-password?token={token}"
+    reset_link = f"{config.FRONTEND_URL}/auth/reset-password?token={token}"
     send_password_reset_email(user.email, reset_link)
 
     return response_message
@@ -236,7 +240,66 @@ async def reset_password(
     await redis.delete(f"password-reset:{data.token}")
 
     logger.info(f"Password reset successful for {email}")
+    send_password_changed_email(user.email, user.first_name)
     return {"message": "Password has been reset successfully. Please log in again."}
+
+
+@router.post("/change-password", status_code=200)
+async def change_password(
+    request: Request,
+    data: PasswordChange,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    """🔒 Зміна пароля з профілю (авторизований користувач)"""
+
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Перевірка старого пароля
+    if not pwd_context.verify(data.old_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Incorrect current password")
+
+    # Оновлення пароля
+    if not await update_password(db, user.email, data.new_password):
+        raise HTTPException(
+            status_code=500,
+            detail="Could not update password. Try again later.",
+        )
+
+    # Відкликаємо старий refresh_token
+    redis = await redis_client.get_redis()
+    old_refresh_token = request.cookies.get("refresh_token")
+    if old_refresh_token:
+        await redis.setex(f"blacklist:{old_refresh_token}", 7 * 24 * 60 * 60, "revoked")
+
+    # Генеруємо нові токени
+    new_access_token = create_access_token(user)
+    new_refresh_token = create_refresh_token(user)
+
+    response = JSONResponse(content={"message": "Password changed successfully"})
+    send_password_changed_email(user.email, user.first_name)
+
+    # Встановлюємо нові токени
+    response.set_cookie(
+        key="access_token",
+        value=new_access_token,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        max_age=3600,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        max_age=7 * 24 * 60 * 60,
+    )
+
+    return response
 
 
 # Отримати всіх користувачів (тільки для librarian)

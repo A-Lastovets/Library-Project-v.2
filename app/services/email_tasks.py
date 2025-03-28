@@ -54,6 +54,36 @@ def send_password_reset_email(self, email: str, reset_link: str):
         raise self.retry(exc=e, countdown=10)  # Повторна спроба через 10 сек
 
 
+@celery_app.task(bind=True, max_retries=3)
+def send_password_changed_email(self, email: str, first_name: str):
+    """📧 Лист про успішну зміну пароля"""
+    subject = "✅ Пароль змінено успішно"
+
+    body = f"""
+    <html>
+        <body>
+            <h2 style="color: #4CAF50;">🔐 Зміна пароля</h2>
+            <p>Привіт, <strong>{first_name}</strong>!</p>
+            <p>Ми хочемо повідомити, що ваш пароль було успішно змінено.</p>
+            <p>Якщо ви не змінювали пароль — негайно зверніться до адміністратора або скористайтесь функцією скидання.</p>
+            <br>
+            <p>З повагою,<br>Ваша бібліотека 📚</p>
+        </body>
+    </html>
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(send_email(email, subject, body, html=True))
+        else:
+            asyncio.run(send_email(email, subject, body, html=True))
+
+        logger.info(f"Password change confirmation email sent to {email}")
+    except Exception as e:
+        logger.error(f"Error sending password changed email to {email}: {e}")
+        raise self.retry(exc=e, countdown=10)
+
+
 @celery_app.task
 def send_reservation_email(email: str, book: dict, expires_at: str):
     """Лист після бронювання книги користувачем"""

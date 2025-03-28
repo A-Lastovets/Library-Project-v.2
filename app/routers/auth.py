@@ -189,7 +189,7 @@ async def request_password_reset(
         user.email,
     )
 
-    reset_link = f"{config.FRONTEND_URL}/auth/reset-password?token={token}"
+    reset_link = f"{config.frontend_url_for_links}/auth/reset-password?token={token}"
     send_password_reset_email(user.email, reset_link)
 
     return response_message

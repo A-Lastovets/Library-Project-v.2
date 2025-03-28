@@ -1,10 +1,11 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
-from fastapi.responses import JSONResponse
+
 from app.config import config
 from app.dependencies.cache import redis_client
 from app.dependencies.database import get_db
@@ -185,7 +186,6 @@ async def request_password_reset(
     )
 
     reset_link = f"{config.frontend_url_for_links}/auth/reset-password?token={token}"
-
     send_password_reset_email(user.email, reset_link)
 
     return response_message

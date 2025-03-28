@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
-
+from fastapi.responses import JSONResponse
 from app.config import config
 from app.dependencies.cache import redis_client
 from app.dependencies.database import get_db
@@ -67,10 +67,9 @@ async def sign_in(
     access_token = create_access_token(user)
     refresh_token = create_refresh_token(user)
 
-    response = Response(
-        content='{"message": "Login successful"}',
-        media_type="application/json",
-    )
+    user_data = UserResponse.model_validate(user).model_dump(by_alias=True)
+
+    response = JSONResponse(content={"message": "Login successful", "user": user_data})
 
     response.set_cookie(
         key="access_token",

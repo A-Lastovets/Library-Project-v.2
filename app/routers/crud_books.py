@@ -24,7 +24,7 @@ from app.schemas.schemas import (
     BulkUpdateResponse,
     RateBook,
 )
-from app.services.user_service import get_current_user_id, librarian_required, get_active_user_id
+from app.services.user_service import get_current_user_id, librarian_required
 
 router = APIRouter(prefix="/books", tags=["Books"])
 
@@ -72,7 +72,7 @@ async def update_book(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
 ):
-    """✏️ Оновлення книги (тільки бібліотекар)."""
+    """Оновлення книги (тільки бібліотекар)."""
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(

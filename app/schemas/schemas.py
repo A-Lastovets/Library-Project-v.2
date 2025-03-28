@@ -31,10 +31,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class LogoutResponse(BaseModel):
-    message: str
-
-
 class UserBase(BaseSchema):
     first_name: Annotated[str, Field(min_length=3, max_length=50)]
     last_name: Annotated[str, Field(min_length=3, max_length=50)]

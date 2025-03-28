@@ -1,5 +1,4 @@
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, HTTPException, Request, status
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -11,7 +10,6 @@ from app.models.user import User
 from app.utils import decode_jwt_token
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/sign-in-swagger")
 
 
 # Отримати користувача за email
@@ -20,16 +18,27 @@ async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
     return result.scalar_one_or_none()
 
 
-# Отримати користувача за токеном
-def get_current_user_id(token: str = Depends(oauth2_scheme)) -> int:
+# Отримати користувача за токеном без перевірки блокування
+async def get_current_user_id(request: Request) -> int:
+    """Отримуємо user_id з JWT токена в куці"""
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     token_data = decode_jwt_token(token, check_blocked=False)
-    return int(token_data["id"])
+    user_id = int(token_data["id"])
+    return user_id
 
 
-# Блокування користувача
-def get_active_user_id(token: str = Depends(oauth2_scheme)) -> int:
+# Отримати користувача за токеном з перевіркою блокування
+async def get_active_user_id(request: Request) -> int:
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     token_data = decode_jwt_token(token, check_blocked=True)
-    return int(token_data["id"])
+    user_id = int(token_data["id"])
+    return user_id
 
 
 # Аутентифікація користувача
@@ -42,17 +51,23 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> User
     return user
 
 
-async def librarian_required(token: str = Depends(oauth2_scheme)):
-    """✅ Перевіряє, чи є користувач бібліотекарем і не заблокований."""
-    token_data = decode_jwt_token(token, check_blocked=True)
+async def librarian_required(request: Request) -> dict:
+    """Перевіряє, чи є користувач бібліотекарем та не заблокований (з куки)."""
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
-    if token_data["role"] != "librarian":
+    token_data = decode_jwt_token(token)
+    librarian_id = token_data.get("id")
+    role = token_data.get("role")
+
+    if role != "librarian":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=403,
             detail="Access denied: Librarian role required",
         )
 
-    return {"id": token_data["id"], "role": token_data["role"]}
+    return {"id": librarian_id, "role": role}
 
 
 async def check_and_block_user(db: AsyncSession, user_id: int):

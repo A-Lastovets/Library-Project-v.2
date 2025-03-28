@@ -59,17 +59,16 @@ def create_password_reset_token(email: str):
 
 # Єдина функція для декодування токенів (access і refresh)
 def decode_jwt_token(token: str, check_blocked: bool = False):
-    """✅ Розшифровує JWT-токен та повертає всі його дані"""
+    """Розшифровує JWT-токен та повертає всі його дані"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate token",
-        headers={"WWW-Authenticate": "Bearer"},
+        headers={"WWW-Authenticate": "cookie"},
     )
 
     try:
         payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
 
-        # Отримуємо всі дані з токена
         user_data = {
             "id": payload.get("id"),
             "first_name": payload.get("first_name"),

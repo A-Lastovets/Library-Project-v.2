@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
-from sqlalchemy.sql import and_, func
+from sqlalchemy.sql import func
 
 from app.dependencies.database import get_db
 from app.exceptions.pagination import paginate_response
@@ -24,7 +24,6 @@ from app.services.user_service import (
     check_and_block_user,
     get_current_user_id,
     librarian_required,
-    get_active_user_id,
 )
 
 router = APIRouter(prefix="/reservations", tags=["Reservations"])

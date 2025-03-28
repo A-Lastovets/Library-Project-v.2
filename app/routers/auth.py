@@ -1,8 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import ValidationError
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
@@ -17,7 +15,6 @@ from app.schemas.schemas import (
     BulkUpdateRequest,
     BulkUpdateResponse,
     LoginRequest,
-    LogoutResponse,
     PasswordReset,
     PasswordResetRequest,
     Token,
@@ -54,20 +51,7 @@ async def sign_in(
     login_data: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """✅ Вхід через JSON"""
-
-    raw_body = await request.json()
-    print("Received raw JSON:", raw_body)
-
-    try:
-        login_data = LoginRequest(**raw_body)
-        print("Parsed LoginRequest:", login_data.model_dump())
-    except ValidationError as e:
-        print("Validation Error:", e.json())  # Логи для дебагу
-        raise HTTPException(status_code=422, detail=e.errors())
-
-    if login_data.email is None or login_data.password is None:
-        raise HTTPException(status_code=400, detail="Email and password are required")
+    """🔐 Вхід користувача — токени в HTTP-only cookies"""
 
     user = await authenticate_user(db, str(login_data.email), str(login_data.password))
     if not user:
@@ -83,11 +67,29 @@ async def sign_in(
     access_token = create_access_token(user)
     refresh_token = create_refresh_token(user)
 
-    return Token(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
+    response = Response(
+        content='{"message": "Login successful"}',
+        media_type="application/json",
     )
+
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        max_age=3600,  # 1 година
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        max_age=7 * 24 * 60 * 60,  # 7 днів
+    )
+
+    return response
 
 
 # Реєстрація користувача
@@ -128,25 +130,32 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
     )
 
 
-@router.post("/logout", response_model=LogoutResponse, status_code=200)
-async def logout(refresh_token: str):
-    """Вихід із системи (відкликання `refreshToken`)."""
+@router.post("/logout", response_model=dict, status_code=200)
+async def logout(request: Request, response: Response):
+    """🔓 Вихід — видалення HTTP-only cookies та відкликання refresh_token"""
 
     redis = await redis_client.get_redis()
+    refresh_token = request.cookies.get("refresh_token")
+
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Missing refresh token")
 
     # Перевіряємо, чи токен вже відкликано
     if await redis.exists(f"blacklist:{refresh_token}"):
         raise HTTPException(status_code=401, detail="Token already revoked")
 
-    # Декодуємо токен (перевіряємо його валідність)
     try:
-        decode_jwt_token(refresh_token)  # Просто перевіряємо, чи токен дійсний
+        decode_jwt_token(refresh_token)
     except HTTPException:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    # Додаємо токен у чорний список Redis (на той же термін, що і його термін дії)
+    # Додаємо у Redis blacklist
     await redis.setex(f"blacklist:{refresh_token}", 7 * 24 * 60 * 60, "revoked")
     logger.info(f"Refresh token revoked: {refresh_token}")
+
+    # Видаляємо куки
+    response.delete_cookie("access_token")
+    response.delete_cookie("refresh_token")
 
     return {"message": "Successfully logged out"}
 
@@ -372,61 +381,52 @@ async def unblock_users(
     )
 
 
-# 🔑 Логін через Swagger UI (OAuth2 Password Flow)
-@router.post(
-    "/sign-in-swagger",
-    status_code=status.HTTP_200_OK,
-    include_in_schema=False,
-)
-async def sign_in_swagger(
-    form_data: OAuth2PasswordRequestForm = Depends(),
+@router.post("/refresh-token", status_code=200)
+async def refresh_token(
+    request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    """🔄 Вхід через Swagger UI (OAuth2 Password Flow)"""
-
-    email = form_data.username
-    password = form_data.password
-
-    user = await authenticate_user(db, email, password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
-
-    access_token = create_access_token(user)
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-    }
-
-
-@router.post("/refresh-token", response_model=Token, status_code=200)
-async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
-    """Оновлення `access_token` за допомогою `refresh_token`"""
+    """Оновлення access_token з HTTP-only refresh_token cookie"""
 
     redis = await redis_client.get_redis()
+    refresh_token = request.cookies.get("refresh_token")
 
-    # Перевіряємо, чи `refreshToken` у чорному списку Redis
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Missing refresh token")
+
     if await redis.exists(f"blacklist:{refresh_token}"):
         raise HTTPException(status_code=401, detail="Refresh token is revoked")
 
-    # Декодуємо токен
-    token_data = decode_jwt_token(refresh_token)
+    try:
+        token_data = decode_jwt_token(refresh_token)
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    # Отримуємо користувача
-    result = await db.execute(select(User).where(User.id == int(token_data["user_id"])))
+    result = await db.execute(select(User).where(User.id == int(token_data["id"])))
     user = result.scalar_one_or_none()
-
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Створюємо новий `accessToken`, що містить всю інформацію про користувача
     new_access_token = create_access_token(user)
+    new_refresh_token = create_refresh_token(user)
 
-    return Token(
-        access_token=new_access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
+    # Встановлюємо оновлені токени у куки
+    response.set_cookie(
+        key="access_token",
+        value=new_access_token,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        max_age=3600,
     )
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+        max_age=7 * 24 * 60 * 60,
+    )
+
+    return {"message": "Access token refreshed"}

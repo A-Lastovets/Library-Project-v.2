@@ -80,16 +80,16 @@ async def sign_in(
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=True,
-        samesite="Lax",
+        secure=False,                      # 👈 бо локалка — без HTTPS
+        samesite="None",                   # 👈 щоб куки передавались між доменами
         max_age=3600,  # 1 година
     )
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=True,
-        samesite="Lax",
+        secure=False,                       # 👈 бо локалка — без HTTPS
+        samesite="None",                    # 👈 щоб куки передавались між доменами
         max_age=7 * 24 * 60 * 60,  # 7 днів
     )
 
@@ -158,9 +158,23 @@ async def logout(request: Request, response: Response):
     logger.info(f"Refresh token revoked: {refresh_token}")
 
     # Видаляємо куки
-    response.delete_cookie("access_token")
-    response.delete_cookie("refresh_token")
+    # response.delete_cookie("access_token")
+    # response.delete_cookie("refresh_token")
 
+    # ⛔ Без цього куки можуть не видалитися в браузері!
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        secure=False,
+        samesite="None",
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        httponly=True,
+        secure=False,
+        samesite="None",
+    )
+    
     return {"message": "Successfully logged out"}
 
 
@@ -286,16 +300,16 @@ async def change_password(
         key="access_token",
         value=new_access_token,
         httponly=True,
-        secure=True,
-        samesite="Lax",
+        secure=False,                       # 👈 бо локалка — без HTTPS
+        samesite="None",                    # 👈 щоб куки передавались між доменами
         max_age=3600,
     )
     response.set_cookie(
         key="refresh_token",
         value=new_refresh_token,
         httponly=True,
-        secure=True,
-        samesite="Lax",
+        secure=False,                       # 👈 бо локалка — без HTTPS
+        samesite="None",                    # 👈 щоб куки передавались між доменами
         max_age=7 * 24 * 60 * 60,
     )
 
@@ -478,16 +492,16 @@ async def refresh_token(
         key="access_token",
         value=new_access_token,
         httponly=True,
-        secure=True,
-        samesite="Lax",
+        secure=False,                       # 👈 бо локалка — без HTTPS
+        samesite="None",                    # 👈 щоб куки передавались між доменами
         max_age=3600,
     )
     response.set_cookie(
         key="refresh_token",
         value=new_refresh_token,
         httponly=True,
-        secure=True,
-        samesite="Lax",
+        secure=False,                       # 👈 бо локалка — без HTTPS
+        samesite="None",                    # 👈 щоб куки передавались між доменами
         max_age=7 * 24 * 60 * 60,
     )
 

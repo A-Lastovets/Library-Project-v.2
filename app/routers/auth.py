@@ -80,7 +80,7 @@ async def sign_in(
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=False,                      # 👈 бо локалка — без HTTPS
+        secure=True,                      # 👈 бо локалка — без HTTPS
         samesite="None",                   # 👈 щоб куки передавались між доменами
         max_age=3600,  # 1 година
     )
@@ -88,7 +88,7 @@ async def sign_in(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=False,                       # 👈 бо локалка — без HTTPS
+        secure=True,                       # 👈 бо локалка — без HTTPS
         samesite="None",                    # 👈 щоб куки передавались між доменами
         max_age=7 * 24 * 60 * 60,  # 7 днів
     )
@@ -165,16 +165,16 @@ async def logout(request: Request, response: Response):
     response.delete_cookie(
         key="access_token",
         httponly=True,
-        secure=False,
+        secure=True,
         samesite="None",
     )
     response.delete_cookie(
         key="refresh_token",
         httponly=True,
-        secure=False,
+        secure=True,
         samesite="None",
     )
-    
+
     return {"message": "Successfully logged out"}
 
 
@@ -300,7 +300,7 @@ async def change_password(
         key="access_token",
         value=new_access_token,
         httponly=True,
-        secure=False,                       # 👈 бо локалка — без HTTPS
+        secure=True,                       # 👈 бо локалка — без HTTPS
         samesite="None",                    # 👈 щоб куки передавались між доменами
         max_age=3600,
     )
@@ -308,7 +308,7 @@ async def change_password(
         key="refresh_token",
         value=new_refresh_token,
         httponly=True,
-        secure=False,                       # 👈 бо локалка — без HTTPS
+        secure=True,                       # 👈 бо локалка — без HTTPS
         samesite="None",                    # 👈 щоб куки передавались між доменами
         max_age=7 * 24 * 60 * 60,
     )
@@ -492,7 +492,7 @@ async def refresh_token(
         key="access_token",
         value=new_access_token,
         httponly=True,
-        secure=False,                       # 👈 бо локалка — без HTTPS
+        secure=True,                       # 👈 бо локалка — без HTTPS
         samesite="None",                    # 👈 щоб куки передавались між доменами
         max_age=3600,
     )
@@ -500,7 +500,7 @@ async def refresh_token(
         key="refresh_token",
         value=new_refresh_token,
         httponly=True,
-        secure=False,                       # 👈 бо локалка — без HTTPS
+        secure=True,                       # 👈 бо локалка — без HTTPS
         samesite="None",                    # 👈 щоб куки передавались між доменами
         max_age=7 * 24 * 60 * 60,
     )

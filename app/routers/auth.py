@@ -82,7 +82,7 @@ async def sign_in(
         httponly=True,
         secure=True,                      # 👈 бо локалка — без HTTPS
         samesite="None",                   # 👈 щоб куки передавались між доменами
-        max_age=3600,  # 1 година
+        max_age=600,  # 10 хв
     )
     response.set_cookie(
         key="refresh_token",
@@ -199,7 +199,7 @@ async def request_password_reset(
     token = create_password_reset_token(user.email)
     await redis.setex(
         f"password-reset:{token}",
-        config.RESET_TOKEN_EXPIRE_MINUTES * 60,
+        config.RESET_TOKEN_EXPIRE_MINUTES,
         user.email,
     )
 
@@ -302,7 +302,7 @@ async def change_password(
         httponly=True,
         secure=True,                       # 👈 бо локалка — без HTTPS
         samesite="None",                    # 👈 щоб куки передавались між доменами
-        max_age=3600,
+        max_age=600,
     )
     response.set_cookie(
         key="refresh_token",
@@ -494,7 +494,7 @@ async def refresh_token(
         httponly=True,
         secure=True,                       # 👈 бо локалка — без HTTPS
         samesite="None",                    # 👈 щоб куки передавались між доменами
-        max_age=3600,
+        max_age=600,
     )
     response.set_cookie(
         key="refresh_token",

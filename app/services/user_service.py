@@ -31,13 +31,29 @@ async def get_current_user_id(request: Request) -> int:
 
 
 # Отримати користувача за токеном з перевіркою блокування
-async def get_active_user_id(request: Request) -> int:
+async def get_active_user_id(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> int:
+    """Отримує user_id тільки якщо користувач існує і не заблокований (читається з куки)"""
     token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    token_data = decode_jwt_token(token, check_blocked=True)
+    token_data = decode_jwt_token(token, check_blocked=False)
     user_id = int(token_data["id"])
+
+    # 🔍 Перевіряємо статус користувача напряму в БД
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.is_blocked:
+        raise HTTPException(
+            status_code=403,
+            detail="Your account is blocked and cannot perform this action.",
+        )
+
     return user_id
 
 

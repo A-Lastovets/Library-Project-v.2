@@ -9,7 +9,7 @@ from app.dependencies.cache import redis_client
 from app.dependencies.database import SessionLocal, init_db
 from app.middlewares.middlewares import setup_middlewares
 from app.roles import create_admin
-from app.routers import auth, crud_books, crud_reservation
+from app.routers import auth, crud_books, crud_reservation, statistics
 
 dictConfig(LogConfig().dict())
 logger = logging.getLogger("app")

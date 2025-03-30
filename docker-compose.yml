@@ -7,10 +7,10 @@ services:
       app:
         condition: service_started
     environment:
-      DATABASE_URL: ${DATABASE_URL}  # Хмарна база PostgreSQL
+      DATABASE_URL: ${DATABASE_URL}
       MAKE_MIGRATIONS: ${MAKE_MIGRATIONS:-false}
       MAKE_MIGRATION_DOWNGRADE: ${MAKE_MIGRATION_DOWNGRADE:-false}
-      MIGRATION_DOWNGRADE_TARGET: ${MIGRATION_DOWNGRADE_TARGET:-63017c98c3da}
+      MIGRATION_DOWNGRADE_TARGET: ${MIGRATION_DOWNGRADE_TARGET:-39dff8215af5}
     command: >
       sh -c "[ "$MAKE_MIGRATIONS" = "true" ] && alembic revision --autogenerate -m 'auto detect changes';
              [ "$MAKE_MIGRATION_DOWNGRADE" = "true" ] && alembic downgrade "$MIGRATION_DOWNGRADE_TARGET";
@@ -26,15 +26,12 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: on-failure
-    container_name: fastapi_app
+    container_name: PostgreSQL
     ports:
       - "5001:5000"
     environment:
-      DATABASE_URL: ${DATABASE_URL}  # Хмарна база PostgreSQL
-      REDIS_URL: ${REDIS_URL}  # Хмарний Redis
-    depends_on:
-      alembic:
-        condition: service_started
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL} 
     networks:
       - app_network
 
@@ -44,10 +41,10 @@ services:
       dockerfile: Dockerfile
     restart: always
     container_name: celery_worker
-    command: celery -A app.services.celery worker --loglevel=info
+    command: celery -A app.services.celery:celery_app worker --loglevel=info
     environment:
-      DATABASE_URL: ${DATABASE_URL}  # Хмарна база PostgreSQL
-      REDIS_URL: ${REDIS_URL}  # Хмарний Redis
+      DATABASE_URL: ${DATABASE_URL}  
+      REDIS_URL: ${REDIS_URL}
     depends_on:
       app:
         condition: service_started
@@ -60,15 +57,31 @@ services:
       dockerfile: Dockerfile
     restart: always
     container_name: celery_beat
-    command: celery -A app.services.celery beat --loglevel=info
+    command: celery -A app.services.celery:celery_app beat --loglevel=info
     environment:
-      DATABASE_URL: ${DATABASE_URL}  # Хмарна база PostgreSQL
-      REDIS_URL: ${REDIS_URL}  # Хмарний Redis
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
     depends_on:
       celery_worker:
         condition: service_started
+    volumes:
+    - ./celerybeat-schedule:/app/celerybeat-schedule
     networks:
       - app_network
+
+  flower:
+      image: mher/flower
+      container_name: flower
+      restart: always
+      ports:
+        - "5555:5555"
+      environment:
+        - CELERY_BROKER_URL=${REDIS_URL}
+        - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH}
+      depends_on:
+        - celery_worker
+      networks:
+        - app_network
 
 networks:
   app_network:

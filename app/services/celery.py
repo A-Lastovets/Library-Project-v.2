@@ -1,5 +1,5 @@
 from celery import Celery
-
+import app.services.celery_beat
 from app.config import config
 
 celery_app = Celery("tasks")

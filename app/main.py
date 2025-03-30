@@ -58,3 +58,8 @@ app.include_router(crud_reservation.router, prefix="/api/v1")
 app.include_router(statistics.router, prefix="/api/v1")
 
 logger.info("✅ Library API успішно запущено!")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="0.0.0.0", port=5000)

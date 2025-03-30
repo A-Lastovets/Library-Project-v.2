@@ -22,9 +22,9 @@ from app.services.email_tasks import (
 )
 from app.services.user_service import (
     check_and_block_user,
+    get_active_user_id,
     get_current_user_id,
     librarian_required,
-    get_active_user_id,
 )
 
 router = APIRouter(prefix="/reservations", tags=["Reservations"])

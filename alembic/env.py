@@ -55,7 +55,7 @@ async def run_migrations_online() -> None:
     connectable = create_async_engine(
         DATABASE_URL,
         poolclass=None,
-        connect_args={"ssl": True},
+        connect_args={"ssl": False},
         execution_options={"compiled_cache": None},
     )
 

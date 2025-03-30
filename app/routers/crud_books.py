@@ -24,13 +24,17 @@ from app.schemas.schemas import (
     BulkUpdateResponse,
     RateBook,
 )
-from app.services.user_service import get_current_user_id, librarian_required, get_active_user_id
+from app.services.user_service import (
+    get_active_user_id,
+    get_current_user_id,
+    librarian_required,
+)
 
 router = APIRouter(prefix="/books", tags=["Books"])
 
 
 @router.post(
-    "/",
+    "",
     response_model=BookResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -89,7 +93,7 @@ async def update_book(
 
 
 @router.delete(
-    "/",
+    "",
     response_model=BulkUpdateResponse,
     status_code=status.HTTP_200_OK,
 )

@@ -8,7 +8,7 @@ engine = create_async_engine(
     config.DATABASE_URL,
     echo=True,
     future=True,
-    connect_args={"ssl": True},
+    connect_args={"ssl": False},
     execution_options={"compiled_cache": None},
 )
 

@@ -10,7 +10,7 @@ from app.models.user import User, UserRole
 router = APIRouter(prefix="/stats", tags=["Statistics"])
 
 
-@router.get("/")
+@router.get("")
 async def get_statistics(db: AsyncSession = Depends(get_db)):
     # Активні читачі (мають хоча б одну резервацію з певним статусом)
     active_users = await db.scalar(

@@ -1,4 +1,23 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fastapi_app
+    restart: on-failure
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASS: ${ADMIN_PASS}
+    ports:
+      - "8000:5000"
+    networks:
+      - app_network
+
   alembic:
     build:
       context: .
@@ -6,32 +25,20 @@ services:
     depends_on:
       app:
         condition: service_started
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      ALEMBIC_DATABASE_URL: ${ALEMBIC_DATABASE_URL}
       MAKE_MIGRATIONS: ${MAKE_MIGRATIONS:-false}
       MAKE_MIGRATION_DOWNGRADE: ${MAKE_MIGRATION_DOWNGRADE:-false}
       MIGRATION_DOWNGRADE_TARGET: ${MIGRATION_DOWNGRADE_TARGET:-39dff8215af5}
     command: >
-      sh -c "[ "$MAKE_MIGRATIONS" = "true" ] && alembic revision --autogenerate -m 'auto detect changes';
-             [ "$MAKE_MIGRATION_DOWNGRADE" = "true" ] && alembic downgrade "$MIGRATION_DOWNGRADE_TARGET";
-             [ "$MAKE_MIGRATION_DOWNGRADE" != "true" ] && alembic upgrade head"
+      sh -c "[ \"$MAKE_MIGRATIONS\" = \"true\" ] && alembic revision --autogenerate -m 'auto detect changes';
+             [ \"$MAKE_MIGRATION_DOWNGRADE\" = \"true\" ] && alembic downgrade \"$MIGRATION_DOWNGRADE_TARGET\";
+             [ \"$MAKE_MIGRATION_DOWNGRADE\" != \"true\" ] && alembic upgrade head"
     volumes:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
-    networks:
-      - app_network
-
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: on-failure
-    container_name: PostgreSQL
-    ports:
-      - "5001:5000"
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL} 
     networks:
       - app_network
 
@@ -44,10 +51,12 @@ services:
     command: celery -A app.services.celery:celery_app worker --loglevel=info
     environment:
       DATABASE_URL: ${DATABASE_URL}  
-      REDIS_URL: ${REDIS_URL}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
     depends_on:
       app:
         condition: service_started
+    env_file:
+      - .env
     networks:
       - app_network
 
@@ -60,28 +69,28 @@ services:
     command: celery -A app.services.celery:celery_app beat --loglevel=info
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
     depends_on:
       celery_worker:
         condition: service_started
-    volumes:
-    - ./celerybeat-schedule:/app/celerybeat-schedule
+    env_file:
+      - .env
     networks:
       - app_network
 
-  flower:
-      image: mher/flower
-      container_name: flower
-      restart: always
-      ports:
-        - "5555:5555"
-      environment:
-        - CELERY_BROKER_URL=${REDIS_URL}
-        - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH}
-      depends_on:
-        - celery_worker
-      networks:
-        - app_network
+#   flower:
+#       image: mher/flower
+#       container_name: flower
+#       restart: always
+#       ports:
+#         - "5555:5555"
+#       environment:
+#         - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+#         - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH}
+#       depends_on:
+#         - celery_worker
+#       networks:
+#         - app_network
 
 networks:
   app_network:

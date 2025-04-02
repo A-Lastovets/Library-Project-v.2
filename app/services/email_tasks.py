@@ -426,7 +426,7 @@ def check_and_send_return_reminders():
 async def _check_and_send_return_reminders():
     async with SessionLocal() as db:
         now = datetime.now()
-        reminder_date = now + timedelta(days=3)
+        reminder_date = now + timedelta(minutes=5)
 
         result = await db.execute(
             select(Reservation)

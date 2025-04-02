@@ -3,7 +3,8 @@ import os
 from logging.config import fileConfig
 
 from dotenv import load_dotenv
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import create_engine
+# from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 from app.dependencies.database import Base
@@ -13,20 +14,25 @@ from app.models.reservation import Reservation
 from app.models.user import User
 
 load_dotenv()
-print("[ENV]", os.environ.get("DATABASE_URL"))
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
+print("[ENV]", os.environ.get("ALEMBIC_DATABASE_URL"))
+ALEMBIC_DATABASE_URL = os.getenv("ALEMBIC_DATABASE_URL")
+if not ALEMBIC_DATABASE_URL:
     raise ValueError("❌ DATABASE_URL is not set in the environment variables!")
 
 config = context.config
 
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+config.set_main_option("sqlalchemy.url", ALEMBIC_DATABASE_URL)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 
+if "sslmode" not in ALEMBIC_DATABASE_URL:
+    if "?" in ALEMBIC_DATABASE_URL:
+        ALEMBIC_DATABASE_URL += "&sslmode=require"
+    else:
+        ALEMBIC_DATABASE_URL += "?sslmode=require"
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
@@ -41,7 +47,7 @@ def run_migrations_offline() -> None:
 
     """
     context.configure(
-        url=DATABASE_URL,
+        url=ALEMBIC_DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -51,29 +57,24 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-async def run_migrations_online() -> None:
-    connectable = create_async_engine(
-        DATABASE_URL,
+def run_migrations_online() -> None:
+    connectable = create_engine(
+        ALEMBIC_DATABASE_URL,
         poolclass=None,
-        connect_args={"ssl": False},
         execution_options={"compiled_cache": None},
     )
 
-    async with connectable.begin() as connection:
-        await connection.run_sync(
-            lambda conn: context.configure(
-                connection=conn,
-                target_metadata=target_metadata,
-            ),
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
         )
 
-        def do_run_migrations(connection):
+        with context.begin_transaction():
             context.run_migrations()
-
-        await connection.run_sync(do_run_migrations)
 
 
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    asyncio.run(run_migrations_online())
+    run_migrations_online()

@@ -1,5 +1,5 @@
 from celery import Celery
-import app.services.celery_beat
+
 from app.config import config
 
 celery_app = Celery("tasks")
@@ -21,3 +21,5 @@ celery_app.conf.update(
 )
 
 celery_app.autodiscover_tasks(["app.services"])
+
+import app.services.celery_beat

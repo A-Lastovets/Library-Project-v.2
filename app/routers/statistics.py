@@ -72,9 +72,11 @@ async def get_statistics(db: AsyncSession = Depends(get_db)):
 
     # Кількість книжок за категоріями
     books_by_category_q = await db.execute(
-        select(Book.category, func.count()).group_by(Book.category),
+        select(func.unnest(Book.category).label("cat"), func.count())
+        .group_by("cat")
     )
     books_by_category = dict(books_by_category_q.all())
+
 
     # Кількість повернутих книг — completed
     returned_books = await db.scalar(

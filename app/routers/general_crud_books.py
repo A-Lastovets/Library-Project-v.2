@@ -10,7 +10,7 @@ from app.exceptions.book_filters import apply_book_filters
 from app.exceptions.pagination import paginate_response
 from app.models.book import Book
 from app.models.rating import Rating
-from app.schemas.schemas import BookResponse, RateBook
+from app.schemas.schemas import BookResponse, RateBook, MyRate, RateBookResponse, MyRateResponse
 from app.services.user_service import get_active_user_id, get_current_user_id
 
 router = APIRouter(prefix="/books", tags=["General Books"])
@@ -94,7 +94,7 @@ async def list_books(
 async def find_book(
     book_id: int,
     db: AsyncSession = Depends(get_db),
-    _: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id),
 ):
 
     result = await db.execute(select(Book).where(Book.id == book_id))
@@ -113,6 +113,18 @@ async def find_book(
     )
     average_rating = rating_result.scalar()
 
+    user_rating_result = await db.execute(
+        select(Rating).where(Rating.book_id == book_id, Rating.user_id == user_id)
+    )
+    user_rating = user_rating_result.scalar_one_or_none()
+
+    my_rate = MyRate(
+    id_rating=user_rating.id if user_rating else None,
+    value=user_rating.rating if user_rating else None,
+    can_rate=user_rating is None,
+    )
+
+
     return BookResponse(
         id=book.id,
         title=book.title,
@@ -124,17 +136,18 @@ async def find_book(
         cover_image=book.cover_image,
         status=book.status,
         average_rating=round(float(average_rating), 1),
+        my_rate=my_rate,
     )
 
 
-@router.post("/rate/{book_id}", status_code=status.HTTP_200_OK)
+@router.post("/rate/{book_id}", response_model=RateBookResponse, status_code=status.HTTP_200_OK)
 async def rate_book(
     book_id: int,
     rating_data: RateBook,
     db: AsyncSession = Depends(get_db),
-    user_id: dict = Depends(get_active_user_id),
+    user_id: int = Depends(get_active_user_id),
 ):
-    """Додати рейтинг книги (лише один раз)"""
+    """Додати або оновити рейтинг книги"""
     book = await db.get(Book, book_id)
     if not book:
         raise HTTPException(
@@ -142,19 +155,33 @@ async def rate_book(
             detail="Book not found",
         )
 
-    # Перевіряємо, чи користувач вже голосував
+    # Шукаємо існуючий рейтинг
     stmt = select(Rating).where(Rating.book_id == book_id, Rating.user_id == user_id)
     result = await db.execute(stmt)
     existing_rating = result.scalars().first()
 
     if existing_rating:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You have already rated this book",
+        existing_rating.rating = rating_data.rating  # 👈 оновлюємо рейтинг
+        await db.commit()
+        await db.refresh(existing_rating)
+        return RateBookResponse(
+            my_rate=MyRateResponse(
+                id_rating=existing_rating.id,
+                value=existing_rating.rating,
+                can_rate=False
+            )
         )
 
+    # Якщо ще не голосував — створюємо новий рейтинг
     new_rating = Rating(book_id=book_id, user_id=user_id, rating=rating_data.rating)
     db.add(new_rating)
-
     await db.commit()
-    return {"message": "Rating submitted successfully"}
+    await db.refresh(new_rating)
+
+    return RateBookResponse(
+        my_rate=MyRateResponse(
+            id_rating=new_rating.id,
+            value=new_rating.rating,
+            can_rate=False
+        )
+    )

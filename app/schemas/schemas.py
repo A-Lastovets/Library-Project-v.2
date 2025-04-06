@@ -120,6 +120,30 @@ class PasswordChange(BaseSchema):
             raise ValueError("New passwords do not match")
         return confirm_new_password
 
+class MyRate(BaseModel):
+    id_rating: Optional[int]
+    value: Optional[float]
+    can_rate: bool
+
+    class Config:
+        alias_generator = BaseSchema.Config.alias_generator
+        populate_by_name = True
+
+class MyRateResponse(BaseModel):
+    id_rating: int
+    value: float
+    can_rate: bool
+
+    class Config:
+        alias_generator = BaseSchema.Config.alias_generator
+        populate_by_name = True
+
+class RateBookResponse(BaseModel):
+    my_rate: MyRateResponse
+
+    class Config:
+        alias_generator = BaseSchema.Config.alias_generator
+        populate_by_name = True
 
 class BookBase(BaseSchema):
     title: str = Field(..., min_length=1, max_length=255)
@@ -143,6 +167,7 @@ class BookResponse(BookBase):
     id: int
     status: BookStatus
     average_rating: float = 0.0
+    my_rate: MyRate
 
     class Config:
         from_attributes = True

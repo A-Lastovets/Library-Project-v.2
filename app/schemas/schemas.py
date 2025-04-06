@@ -124,7 +124,7 @@ class BookBase(BaseSchema):
     title: str = Field(..., min_length=1, max_length=255)
     author: str = Field(..., min_length=1, max_length=255)
     year: int
-    category: str
+    category: List[str]
     language: str
     description: Optional[str] = None
     cover_image: str

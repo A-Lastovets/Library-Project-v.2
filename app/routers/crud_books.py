@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,7 +58,18 @@ async def create_book(
             detail="A book with this title and author already exists.",
         )
 
-    new_book = Book(**book_data.model_dump(), status=BookStatus.AVAILABLE)
+    data = book_data.model_dump()
+    new_book = Book(
+        title=data["title"],
+        author=data["author"],
+        year=data["year"],
+        category=data["category"],
+        language=data["language"],
+        description=data["description"],
+        cover_image=data["cover_image"],
+        status=BookStatus.AVAILABLE,
+    )
+
     db.add(new_book)
     await db.commit()
     await db.refresh(new_book)
@@ -84,7 +95,13 @@ async def update_book(
             detail="Book not found",
         )
 
-    for key, value in book_data.model_dump(exclude_unset=True).items():
+    update_data = book_data.model_dump(exclude_unset=True)
+
+    # перевіряємо, якщо раптом category прийшов як рядок
+    if "category" in update_data and isinstance(update_data["category"], str):
+        update_data["category"] = [update_data["category"]]
+
+    for key, value in update_data.items():
         setattr(book, key, value)
 
     await db.commit()
@@ -195,7 +212,7 @@ async def list_books(
     _: int = Depends(get_current_user_id),
     title: Optional[str] = None,
     author: Optional[str] = None,
-    category: Optional[str] = None,
+    category: Optional[List[str]] = Query(None),
     year: Optional[str] = None,
     language: Optional[str] = None,
     status: Optional[str] = None,

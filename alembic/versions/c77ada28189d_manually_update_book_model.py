@@ -21,21 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    # Видаляємо старі колонки
-    op.drop_column("books", "is_reserved")
-    op.drop_column("books", "is_checked_out")
-
-    # Додаємо новий Enum-стовпець "status"
-    op.add_column(
-        "books",
-        sa.Column(
-            "status",
-            sa.Enum(BookStatus, name="bookstatus"),
-            nullable=False,
-            server_default="available",
-        ),
-    )
-
+    pass
 
 def downgrade():
     # Додаємо назад старі колонки (якщо потрібно скасувати міграцію)

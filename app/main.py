@@ -9,7 +9,16 @@ from app.dependencies.cache import redis_client
 from app.dependencies.database import SessionLocal, init_db
 from app.middlewares.middlewares import setup_middlewares
 from app.roles import create_admin
-from app.routers import auth, crud_books, crud_reservation, statistics
+from app.routers import (
+    auth,
+    general_crud_books,
+    general_reservations,
+    librarian_crud_books,
+    librarian_reservations,
+    statistics,
+    user_crud_books,
+    user_reservations,
+)
 
 dictConfig(LogConfig().dict())
 logger = logging.getLogger("app")
@@ -53,8 +62,12 @@ app = FastAPI(
 setup_middlewares(app)
 
 app.include_router(auth.router, prefix="/api/v1")
-app.include_router(crud_books.router, prefix="/api/v1")
-app.include_router(crud_reservation.router, prefix="/api/v1")
+app.include_router(general_crud_books.router, prefix="/api/v1")
+app.include_router(general_reservations.router, prefix="/api/v1")
+app.include_router(librarian_crud_books.router, prefix="/api/v1")
+app.include_router(librarian_reservations.router, prefix="/api/v1")
+app.include_router(user_crud_books.router, prefix="/api/v1")
+app.include_router(user_reservations.router, prefix="/api/v1")
 app.include_router(statistics.router, prefix="/api/v1")
 
 logger.info("✅ Library API успішно запущено!")

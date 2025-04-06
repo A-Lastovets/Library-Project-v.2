@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from app.models.book import BookStatus
 from app.models.reservation import ReservationStatus
 from app.models.user import UserRole
+from app.models.wishlist import Wishlist
 from app.oauth2 import validate_password_schema
 
 
@@ -124,7 +125,7 @@ class BookBase(BaseSchema):
     title: str = Field(..., min_length=1, max_length=255)
     author: str = Field(..., min_length=1, max_length=255)
     year: int
-    category: str
+    category: List[str]
     language: str
     description: Optional[str] = None
     cover_image: str
@@ -176,3 +177,21 @@ class ReservationResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class WishlistAddRequest(BaseModel):
+    book_id: int
+
+
+class WishlistItemResponse(BaseModel):
+    book_id: int
+    title: str
+    author: str
+
+    @classmethod
+    def from_orm(cls, wishlist: Wishlist):
+        return cls(
+            book_id=wishlist.book.id,
+            title=wishlist.book.title,
+            author=wishlist.book.author,
+        )

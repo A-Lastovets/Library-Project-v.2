@@ -3,6 +3,7 @@ from enum import Enum as PyEnum
 from sqlalchemy import Column, DateTime
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy import Integer, String, func
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 
 from app.dependencies.database import Base
@@ -22,7 +23,7 @@ class Book(Base):
     title = Column(String, nullable=False, index=True)
     author = Column(String, nullable=False, index=True)
     year = Column(Integer, nullable=False, index=True)
-    category = Column(String, nullable=False, index=True)
+    category = Column(ARRAY(String), nullable=False, index=True)
     language = Column(String, nullable=False, index=True)
     description = Column(String, nullable=False)
     cover_image = Column(String, nullable=False)

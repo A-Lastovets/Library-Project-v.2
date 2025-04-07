@@ -49,10 +49,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-# 🔑 Логін користувача (отримання JWT-токена)
-@router.post("/sign-in", response_model=Token, status_code=status.HTTP_200_OK)
+# 🔑 Логін користувача через http-only cookies
+@router.post("/sign-in", status_code=status.HTTP_200_OK)
 async def sign_in(
-    request: Request,
     login_data: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -82,7 +81,7 @@ async def sign_in(
         httponly=True,
         secure=True,
         samesite="None",
-        max_age=3600,  # 1 година
+        max_age=3600,
     )
     response.set_cookie(
         key="refresh_token",
@@ -90,14 +89,14 @@ async def sign_in(
         httponly=True,
         secure=True,
         samesite="None",
-        max_age=7 * 24 * 60 * 60,  # 7 днів
+        max_age=7 * 24 * 60 * 60,
     )
 
     return response
 
 
 # Реєстрація користувача
-@router.post("/sign-up", response_model=Token, status_code=status.HTTP_201_CREATED)
+@router.post("/sign-up", status_code=status.HTTP_201_CREATED)
 async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
     existing_user = await get_user_by_email(db, user.email)
     if existing_user:
@@ -127,11 +126,30 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
 
     send_welcome_email(user.email, user.first_name)
 
-    return Token(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
+    user_data = UserResponse.model_validate(created_user).model_dump(by_alias=True)
+
+    response = JSONResponse(
+        content={"message": "User created successfully", "user": user_data}
     )
+
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="None",
+        max_age=3600,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="None",
+        max_age=7 * 24 * 60 * 60,
+    )
+
+    return response
 
 
 @router.post("/logout", response_model=dict, status_code=200)

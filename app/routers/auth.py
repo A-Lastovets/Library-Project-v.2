@@ -1,11 +1,12 @@
 import logging
-
+from fastapi.security import OAuth2PasswordBearer
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
-
+from pydantic import ValidationError
 from app.config import config
 from app.dependencies.cache import redis_client
 from app.dependencies.database import get_db
@@ -45,36 +46,46 @@ from app.utils import (
 )
 
 logger = logging.getLogger(__name__)
-
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/sign-in-swagger")
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-# 🔑 Логін користувача (отримання JWT-токена)
-@router.post("/sign-in", response_model=Token, status_code=status.HTTP_200_OK)
+# 🔑 Логін користувача (отримання JWT-токена або куки)
+@router.post("/sign-in", status_code=status.HTTP_200_OK)
 async def sign_in(
-    request: Request,
     login_data: LoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """🔐 Вхід користувача — токени в HTTP-only cookies"""
+    """🔐 Вхід користувача — автоматично обирає між куками або JSON"""
 
-    user = await authenticate_user(db, str(login_data.email), str(login_data.password))
+    user = await authenticate_user(db, login_data.email, login_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": "Invalid Credentials",
-                "message": "Invalid email or password. Please check your credentials and try again.",
-                "suggestion": "If you forgot your password, use the password recovery option.",
-            },
+            detail="Invalid email or password",
         )
 
     access_token = create_access_token(user)
     refresh_token = create_refresh_token(user)
-
     user_data = UserResponse.model_validate(user).model_dump(by_alias=True)
 
-    response = JSONResponse(content={"message": "Login successful", "user": user_data})
+    # 🧠 Перевіряємо, чи клієнт просить токен
+    auth_type = request.headers.get("X-Auth-Type", "").lower()
+
+    if auth_type == "token":
+        return {
+            "message": "Login successful",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user": user_data,
+        }
+
+    # 🔐 Інакше — встановлюємо токени в куки
+    response = JSONResponse(
+        content={"message": "Login successful", "user": user_data}
+    )
 
     response.set_cookie(
         key="access_token",
@@ -82,7 +93,7 @@ async def sign_in(
         httponly=True,
         secure=True,
         samesite="None",
-        max_age=3600,  # 1 година
+        max_age=3600,
     )
     response.set_cookie(
         key="refresh_token",
@@ -90,28 +101,30 @@ async def sign_in(
         httponly=True,
         secure=True,
         samesite="None",
-        max_age=7 * 24 * 60 * 60,  # 7 днів
+        max_age=7 * 24 * 60 * 60,
     )
 
     return response
 
 
 # Реєстрація користувача
-@router.post("/sign-up", response_model=Token, status_code=status.HTTP_201_CREATED)
-async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
+@router.post("/sign-up", status_code=status.HTTP_201_CREATED)
+async def sign_up(
+    user: UserCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     existing_user = await get_user_by_email(db, user.email)
     if existing_user:
-        error_detail = {
-            "error": "User Already Exists",
-            "message": "A user with this email is already registered.",
-            "suggestion": "Try logging in or use password recovery.",
-        }
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_detail,
+            detail={
+                "error": "User Already Exists",
+                "message": "A user with this email is already registered.",
+                "suggestion": "Try logging in or use password recovery.",
+            },
         )
 
-    # Валідація пароля перед створенням користувача
     validate_password(user.password)
 
     role = (
@@ -125,26 +138,204 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
     access_token = create_access_token(created_user)
     refresh_token = create_refresh_token(created_user)
 
-    send_welcome_email(user.email, user.first_name)
+    send_welcome_email(created_user.email, created_user.first_name)
 
-    return Token(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
+    user_data = UserResponse.model_validate(created_user).model_dump(by_alias=True)
+
+    # 🧠 Визначаємо тип автентифікації
+    auth_type = request.headers.get("X-Auth-Type", "").lower()
+
+    if auth_type == "token":
+        return {
+            "message": "User registered successfully",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user": user_data,
+        }
+
+    # 🔐 Інакше — ставимо токени в куки
+    response = JSONResponse(
+        content={"message": "User registered successfully", "user": user_data}
     )
+
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="None",
+        max_age=3600,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="None",
+        max_age=7 * 24 * 60 * 60,
+    )
+
+    return response
+
+
+# # 🔑 Логін користувача (отримання JWT-токена)
+# @router.post("/sign-in", status_code=status.HTTP_200_OK)
+# async def sign_in(
+#     login_data: LoginRequest,
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     """🔐 Вхід користувача — токени в HTTP-only cookies"""
+
+#     user = await authenticate_user(db, str(login_data.email), str(login_data.password))
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail={
+#                 "error": "Invalid Credentials",
+#                 "message": "Invalid email or password. Please check your credentials and try again.",
+#                 "suggestion": "If you forgot your password, use the password recovery option.",
+#             },
+#         )
+
+#     access_token = create_access_token(user)
+#     refresh_token = create_refresh_token(user)
+
+#     user_data = UserResponse.model_validate(user).model_dump(by_alias=True)
+
+#     response = JSONResponse(content={"message": "Login successful", "user": user_data})
+
+#     response.set_cookie(
+#         key="access_token",
+#         value=access_token,
+#         httponly=True,
+#         secure=True,
+#         samesite="None",
+#         max_age=3600,  # 1 година
+#     )
+#     response.set_cookie(
+#         key="refresh_token",
+#         value=refresh_token,
+#         httponly=True,
+#         secure=True,
+#         samesite="None",
+#         max_age=7 * 24 * 60 * 60,  # 7 днів
+#     )
+
+#     return response
+
+
+# # Реєстрація користувача
+# @router.post("/sign-up", status_code=status.HTTP_201_CREATED)
+# async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
+#     existing_user = await get_user_by_email(db, user.email)
+#     if existing_user:
+#         error_detail = {
+#             "error": "User Already Exists",
+#             "message": "A user with this email is already registered.",
+#             "suggestion": "Try logging in or use password recovery.",
+#         }
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=error_detail,
+#         )
+
+#     # Валідація пароля перед створенням користувача
+#     validate_password(user.password)
+
+#     role = (
+#         "librarian"
+#         if user.secret_code and user.secret_code.strip() == config.SECRET_LIBRARIAN_CODE
+#         else "reader"
+#     )
+
+#     created_user = await create_user(db, user, role)
+
+#     access_token = create_access_token(created_user)
+#     refresh_token = create_refresh_token(created_user)
+
+#     send_welcome_email(user.email, user.first_name)
+
+#     user_data = UserResponse.model_validate(created_user).model_dump(by_alias=True)
+
+#     response = JSONResponse(
+#         content={"message": "User created successfully", "user": user_data}
+#     )
+
+#     response.set_cookie(
+#         key="access_token",
+#         value=access_token,
+#         httponly=True,
+#         secure=True,
+#         samesite="None",
+#         max_age=3600,
+#     )
+#     response.set_cookie(
+#         key="refresh_token",
+#         value=refresh_token,
+#         httponly=True,
+#         secure=True,
+#         samesite="None",
+#         max_age=7 * 24 * 60 * 60,
+#     )
+
+#     return response
+
+
+# @router.post("/logout", response_model=dict, status_code=200)
+# async def logout(request: Request, response: Response):
+#     """🔓 Вихід — видалення HTTP-only cookies та відкликання refresh_token"""
+
+#     redis = await redis_client.get_redis()
+#     refresh_token = request.cookies.get("refresh_token")
+
+#     if not refresh_token:
+#         raise HTTPException(status_code=401, detail="Missing refresh token")
+
+#     # Перевіряємо, чи токен вже відкликано
+#     if await redis.exists(f"blacklist:{refresh_token}"):
+#         raise HTTPException(status_code=401, detail="Token already revoked")
+
+#     try:
+#         decode_jwt_token(refresh_token)
+#     except HTTPException:
+#         raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+#     # Додаємо у Redis blacklist
+#     await redis.setex(f"blacklist:{refresh_token}", 7 * 24 * 60 * 60, "revoked")
+#     logger.info(f"Refresh token revoked: {refresh_token}")
+
+#     # Видаляємо куки
+#     response.delete_cookie(
+#         key="access_token",
+#         httponly=True,
+#         secure=True,
+#         samesite="None",
+#     )
+#     response.delete_cookie(
+#         key="refresh_token",
+#         httponly=True,
+#         secure=True,
+#         samesite="None",
+#     )
+
+#     return {"message": "Successfully logged out"}
 
 
 @router.post("/logout", response_model=dict, status_code=200)
-async def logout(request: Request, response: Response):
-    """🔓 Вихід — видалення HTTP-only cookies та відкликання refresh_token"""
+async def logout(
+    request: Request,
+    response: Response,
+    token_from_header: str = Depends(oauth2_scheme),
+):
+    """🔓 Вихід — видалення куки або відкликання токена з Authorization"""
 
     redis = await redis_client.get_redis()
-    refresh_token = request.cookies.get("refresh_token")
+    refresh_token = request.cookies.get("refresh_token") or token_from_header
 
     if not refresh_token:
         raise HTTPException(status_code=401, detail="Missing refresh token")
 
-    # Перевіряємо, чи токен вже відкликано
     if await redis.exists(f"blacklist:{refresh_token}"):
         raise HTTPException(status_code=401, detail="Token already revoked")
 
@@ -153,11 +344,9 @@ async def logout(request: Request, response: Response):
     except HTTPException:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    # Додаємо у Redis blacklist
     await redis.setex(f"blacklist:{refresh_token}", 7 * 24 * 60 * 60, "revoked")
     logger.info(f"Refresh token revoked: {refresh_token}")
 
-    # Видаляємо куки
     response.delete_cookie(
         key="access_token",
         httponly=True,
@@ -172,6 +361,7 @@ async def logout(request: Request, response: Response):
     )
 
     return {"message": "Successfully logged out"}
+
 
 
 # Запит на скидання пароля
@@ -453,16 +643,68 @@ async def unblock_users(
     )
 
 
+# @router.post("/refresh-token", status_code=200)
+# async def refresh_token(
+#     request: Request,
+#     response: Response,
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     """Оновлення access_token з HTTP-only refresh_token cookie"""
+
+#     redis = await redis_client.get_redis()
+#     refresh_token = request.cookies.get("refresh_token")
+
+#     if not refresh_token:
+#         raise HTTPException(status_code=401, detail="Missing refresh token")
+
+#     if await redis.exists(f"blacklist:{refresh_token}"):
+#         raise HTTPException(status_code=401, detail="Refresh token is revoked")
+
+#     try:
+#         token_data = decode_jwt_token(refresh_token)
+#     except HTTPException:
+#         raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+#     result = await db.execute(select(User).where(User.id == int(token_data["id"])))
+#     user = result.scalar_one_or_none()
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
+
+#     new_access_token = create_access_token(user)
+#     new_refresh_token = create_refresh_token(user)
+
+#     # Встановлюємо оновлені токени у куки
+#     response.set_cookie(
+#         key="access_token",
+#         value=new_access_token,
+#         httponly=True,
+#         secure=True,
+#         samesite="None",
+#         max_age=3600,
+#     )
+#     response.set_cookie(
+#         key="refresh_token",
+#         value=new_refresh_token,
+#         httponly=True,
+#         secure=True,
+#         samesite="None",
+#         max_age=7 * 24 * 60 * 60,
+#     )
+
+#     return {"message": "Access token refreshed"}
+
+
 @router.post("/refresh-token", status_code=200)
 async def refresh_token(
     request: Request,
     response: Response,
+    token_from_header: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ):
-    """Оновлення access_token з HTTP-only refresh_token cookie"""
+    """Оновлення access_token з refresh_token з куки або Authorization. Відповідь: куки або JSON."""
 
     redis = await redis_client.get_redis()
-    refresh_token = request.cookies.get("refresh_token")
+    refresh_token = request.cookies.get("refresh_token") or token_from_header
 
     if not refresh_token:
         raise HTTPException(status_code=401, detail="Missing refresh token")
@@ -483,7 +725,18 @@ async def refresh_token(
     new_access_token = create_access_token(user)
     new_refresh_token = create_refresh_token(user)
 
-    # Встановлюємо оновлені токени у куки
+    auth_type = request.headers.get("X-Auth-Type", "").lower()
+
+    if auth_type == "token":
+        return {
+            "message": "Access token refreshed",
+            "access_token": new_access_token,
+            "refresh_token": new_refresh_token,
+            "token_type": "bearer",
+        }
+
+    # 🔐 Встановлюємо оновлені токени в куки
+    response = JSONResponse(content={"message": "Access token refreshed"})
     response.set_cookie(
         key="access_token",
         value=new_access_token,
@@ -501,4 +754,34 @@ async def refresh_token(
         max_age=7 * 24 * 60 * 60,
     )
 
-    return {"message": "Access token refreshed"}
+    return response
+
+
+# 🔑 Логін через Swagger UI (OAuth2 Password Flow)
+@router.post(
+    "/sign-in-swagger",
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def sign_in_swagger(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    """🔄 Вхід через Swagger UI (OAuth2 Password Flow)"""
+
+    email = form_data.username
+    password = form_data.password
+
+    user = await authenticate_user(db, email, password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    access_token = create_access_token(user)
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }

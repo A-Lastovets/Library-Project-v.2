@@ -50,61 +50,52 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/sign-in-swagger")
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-# 🔑 Логін користувача (отримання JWT-токена або куки)
 @router.post("/sign-in", status_code=status.HTTP_200_OK)
 async def sign_in(
-    login_data: LoginRequest,
     request: Request,
+    login_data: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """🔐 Вхід користувача — автоматично обирає між куками або JSON"""
-
-    user = await authenticate_user(db, login_data.email, login_data.password)
+    user = await authenticate_user(db, str(login_data.email), str(login_data.password))
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
     access_token = create_access_token(user)
     refresh_token = create_refresh_token(user)
-    user_data = UserResponse.model_validate(user).model_dump(by_alias=True)
 
-    # 🧠 Перевіряємо, чи клієнт просить токен
-    auth_type = request.headers.get("X-Auth-Type", "").lower()
+    use_cookies = request.headers.get("X-Use-Cookies", "true").lower() == "true"
 
-    if auth_type == "token":
-        return {
-            "message": "Login successful",
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "user": user_data,
-        }
+    if use_cookies:
+        user_data = UserResponse.model_validate(user).model_dump(by_alias=True)
 
-    # 🔐 Інакше — встановлюємо токени в куки
-    response = JSONResponse(
-        content={"message": "Login successful", "user": user_data}
-    )
+        response = JSONResponse(
+            content={"message": "Login successful", "user": user_data}
+        )
 
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=True,
-        samesite="None",
-        max_age=3600,
-    )
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,
-        secure=True,
-        samesite="None",
-        max_age=7 * 24 * 60 * 60,
-    )
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            secure=True,
+            samesite="None",
+            max_age=3600,
+        )
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            httponly=True,
+            secure=True,
+            samesite="None",
+            max_age=7 * 24 * 60 * 60,
+        )
+        return response
 
-    return response
+    # 🔐 Відповідь з токенами (без куків)
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+    }
 
 
 # Реєстрація користувача

@@ -52,7 +52,7 @@ async def list_books(
         "year": year,
         "language": language,
         "status": status,
-        "query": query,
+        "query_text": query,
     }
 
     total, books = await get_filtered_books(db, filters, page, per_page)

@@ -129,7 +129,7 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
     user_data = UserResponse.model_validate(created_user).model_dump(by_alias=True)
 
     response = JSONResponse(
-        content={"message": "User created successfully", "user": user_data}
+        content={"message": "User created successfully", "user": user_data},
     )
 
     response.set_cookie(

@@ -120,6 +120,7 @@ class PasswordChange(BaseSchema):
             raise ValueError("New passwords do not match")
         return confirm_new_password
 
+
 class MyRate(BaseModel):
     id_rating: Optional[int]
     value: Optional[float]
@@ -128,6 +129,7 @@ class MyRate(BaseModel):
     class Config:
         alias_generator = BaseSchema.Config.alias_generator
         populate_by_name = True
+
 
 class MyRateResponse(BaseModel):
     id_rating: int
@@ -138,12 +140,41 @@ class MyRateResponse(BaseModel):
         alias_generator = BaseSchema.Config.alias_generator
         populate_by_name = True
 
+
 class RateBookResponse(BaseModel):
     my_rate: MyRateResponse
 
     class Config:
         alias_generator = BaseSchema.Config.alias_generator
         populate_by_name = True
+
+
+class SubCommentResponse(BaseModel):
+    subcomment_id: int
+    subcomment: str
+    author: str
+    created_at: datetime
+    sub_comments: Optional[List["SubCommentResponse"]] = []
+
+    class Config:
+        alias_generator = BaseSchema.Config.alias_generator
+        populate_by_name = True
+
+
+SubCommentResponse.model_rebuild()
+
+
+class CommentResponse(BaseModel):
+    comment_id: int
+    comment: str
+    author: str
+    created_at: datetime
+    sub_comments: List[SubCommentResponse]
+
+    class Config:
+        alias_generator = BaseSchema.Config.alias_generator
+        populate_by_name = True
+
 
 class BookBase(BaseSchema):
     title: str = Field(..., min_length=1, max_length=255)
@@ -153,6 +184,12 @@ class BookBase(BaseSchema):
     language: str
     description: Optional[str] = None
     cover_image: str
+
+    @field_validator("category", mode="before")
+    def ensure_list(cls, v):
+        if isinstance(v, str):
+            return [v]
+        return v
 
 
 class BookCreate(BookBase):
@@ -167,7 +204,8 @@ class BookResponse(BookBase):
     id: int
     status: BookStatus
     average_rating: float = 0.0
-    my_rate: MyRate
+    my_rate: Optional[MyRate] = None
+    comments: Optional[List[CommentResponse]] = []
 
     class Config:
         from_attributes = True
@@ -204,19 +242,30 @@ class ReservationResponse(BaseModel):
         from_attributes = True
 
 
+class BookShortResponse(BaseSchema):
+    id: int
+    title: str
+    author: str
+    year: int
+    category: List[str]
+    language: str
+    description: Optional[str]
+    cover_image: str
+    status: BookStatus
+    average_rating: float = 0.0
+
+    class Config:
+        from_attributes = True
+
 class WishlistAddRequest(BaseModel):
     book_id: int
 
 
 class WishlistItemResponse(BaseModel):
-    book_id: int
-    title: str
-    author: str
+    id: int
+    added_at: datetime
+    book: BookShortResponse
+    user: UserResponse
 
-    @classmethod
-    def from_orm(cls, wishlist: Wishlist):
-        return cls(
-            book_id=wishlist.book.id,
-            title=wishlist.book.title,
-            author=wishlist.book.author,
-        )
+    class Config:
+        from_attributes = True

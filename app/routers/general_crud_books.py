@@ -1,16 +1,25 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from sqlalchemy.sql import func
 
 from app.dependencies.database import get_db
-from app.exceptions.book_filters import apply_book_filters
 from app.exceptions.pagination import paginate_response
 from app.models.book import Book
+from app.models.comments import Comment
 from app.models.rating import Rating
-from app.schemas.schemas import BookResponse, RateBook, MyRate, RateBookResponse, MyRateResponse
+from app.models.user import User
+from app.schemas.schemas import (
+    BookResponse,
+    MyRate,
+    MyRateResponse,
+    RateBook,
+    RateBookResponse,
+)
+from app.services.books_service import format_book_list, get_filtered_books
+from app.services.comments_service import get_book_comments
 from app.services.user_service import get_active_user_id, get_current_user_id
 
 router = APIRouter(prefix="/books", tags=["General Books"])
@@ -36,53 +45,20 @@ async def list_books(
     ),
 ):
 
-    base_stmt = select(Book).outerjoin(Rating).group_by(Book.id)
-    base_stmt = apply_book_filters(
-        base_stmt,
-        title,
-        author,
-        category,
-        year,
-        language,
-        status,
-        query,
-    )
+    filters = {
+        "title": title,
+        "author": author,
+        "category": category,
+        "year": year,
+        "language": language,
+        "status": status,
+        "query": query,
+    }
 
-    # Отримуємо загальну кількість книг, які відповідають фільтрам
-    total_books = await db.scalar(
-        select(func.count()).select_from(base_stmt.subquery()),
-    )
+    total, books = await get_filtered_books(db, filters, page, per_page)
+    book_list = format_book_list(books)
 
-    # Додаємо сортування та пагінацію
-    stmt = (
-        base_stmt.add_columns(
-            func.coalesce(func.avg(Rating.rating), 0).label("average_rating"),
-        )
-        .order_by(Book.created_at.desc())
-        .limit(per_page)
-        .offset((page - 1) * per_page)
-    )
-
-    result = await db.execute(stmt)
-    books = result.fetchall()
-
-    book_list = [
-        {
-            "id": book.id,
-            "title": book.title,
-            "author": book.author,
-            "year": book.year,
-            "category": book.category,
-            "language": book.language,
-            "description": book.description,
-            "status": book.status.value,
-            "average_rating": round(float(average_rating), 1),
-            "coverImage": book.cover_image,
-        }
-        for book, average_rating in books
-    ]
-
-    return paginate_response(total_books, page, per_page, book_list)
+    return paginate_response(total, page, per_page, book_list)
 
 
 # Отримати одну книгу за ID
@@ -114,16 +90,17 @@ async def find_book(
     average_rating = rating_result.scalar()
 
     user_rating_result = await db.execute(
-        select(Rating).where(Rating.book_id == book_id, Rating.user_id == user_id)
+        select(Rating).where(Rating.book_id == book_id, Rating.user_id == user_id),
     )
     user_rating = user_rating_result.scalar_one_or_none()
 
     my_rate = MyRate(
-    id_rating=user_rating.id if user_rating else None,
-    value=user_rating.rating if user_rating else None,
-    can_rate=user_rating is None,
+        id_rating=user_rating.id if user_rating else None,
+        value=user_rating.rating if user_rating else None,
+        can_rate=user_rating is None,
     )
 
+    comments = await get_book_comments(book_id=book_id, db=db)
 
     return BookResponse(
         id=book.id,
@@ -137,10 +114,15 @@ async def find_book(
         status=book.status,
         average_rating=round(float(average_rating), 1),
         my_rate=my_rate,
+        comments=comments,
     )
 
 
-@router.post("/rate/{book_id}", response_model=RateBookResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/rate/{book_id}",
+    response_model=RateBookResponse,
+    status_code=status.HTTP_200_OK,
+)
 async def rate_book(
     book_id: int,
     rating_data: RateBook,
@@ -161,15 +143,15 @@ async def rate_book(
     existing_rating = result.scalars().first()
 
     if existing_rating:
-        existing_rating.rating = rating_data.rating  # 👈 оновлюємо рейтинг
+        existing_rating.rating = rating_data.rating  # оновлюємо рейтинг
         await db.commit()
         await db.refresh(existing_rating)
         return RateBookResponse(
             my_rate=MyRateResponse(
                 id_rating=existing_rating.id,
                 value=existing_rating.rating,
-                can_rate=False
-            )
+                can_rate=False,
+            ),
         )
 
     # Якщо ще не голосував — створюємо новий рейтинг
@@ -182,6 +164,58 @@ async def rate_book(
         my_rate=MyRateResponse(
             id_rating=new_rating.id,
             value=new_rating.rating,
-            can_rate=False
-        )
+            can_rate=False,
+        ),
     )
+
+
+@router.post("/comment/{book_id}")
+async def add_comment(
+    book_id: int,
+    content: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_active_user_id),
+):
+    comment = Comment(book_id=book_id, user_id=user_id, content=content)
+    db.add(comment)
+    await db.commit()
+    await db.refresh(comment)
+
+    user = await db.get(User, user_id)
+    author = f"{user.first_name} {user.last_name}" if user else "Unknown user"
+
+    return {
+        "message": "Comment added",
+        "comment_id": comment.id,
+        "author": author,
+    }
+
+
+@router.post("/comment/{comment_id}/reply")
+async def reply_comment(
+    comment_id: int,
+    content: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_active_user_id),
+):
+    parent_comment = await db.get(Comment, comment_id)
+    if not parent_comment:
+        raise HTTPException(status_code=404, detail="Parent comment not found")
+
+    reply = Comment(
+        book_id=parent_comment.book_id,
+        user_id=user_id,
+        content=content,
+        parent_id=comment_id,
+    )
+    db.add(reply)
+    await db.commit()
+    await db.refresh(reply)
+    user = await db.get(User, user_id)
+    author = f"{user.first_name} {user.last_name}" if user else "Unknown user"
+
+    return {
+        "message": "Reply added",
+        "subcomment_id": reply.id,
+        "author": author,
+    }

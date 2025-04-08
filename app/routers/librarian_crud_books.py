@@ -1,8 +1,8 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from sqlalchemy.sql import func
 
 from app.dependencies.database import get_db
@@ -10,6 +10,7 @@ from app.exceptions.pagination import paginate_response
 from app.exceptions.serialization import serialize_book_with_user_reservation
 from app.exceptions.subquery_reserv import get_latest_reservation_alias
 from app.models.book import Book, BookStatus
+from app.models.comments import Comment
 from app.models.user import User
 from app.schemas.schemas import (
     BookCreate,
@@ -18,6 +19,7 @@ from app.schemas.schemas import (
     BulkUpdateRequest,
     BulkUpdateResponse,
 )
+from app.services.comments_service import get_book_comments
 from app.services.user_service import librarian_required
 
 router = APIRouter(prefix="/books", tags=["Librarian Books"])
@@ -49,21 +51,28 @@ async def create_book(
         )
 
     data = book_data.model_dump()
-    new_book = Book(
-        title=data["title"],
-        author=data["author"],
-        year=data["year"],
-        category=data["category"],
-        language=data["language"],
-        description=data["description"],
-        cover_image=data["cover_image"],
-        status=BookStatus.AVAILABLE,
-    )
+    new_book = Book(**data)
 
     db.add(new_book)
     await db.commit()
     await db.refresh(new_book)
-    return new_book
+
+    comments = await get_book_comments(book_id=new_book.id, db=db)
+
+    return BookResponse(
+        id=new_book.id,
+        title=new_book.title,
+        author=new_book.author,
+        year=new_book.year,
+        category=new_book.category,
+        language=new_book.language,
+        description=new_book.description,
+        cover_image=new_book.cover_image,
+        status=new_book.status,
+        average_rating=0.0,
+        my_rate={"id_rating": None, "value": None, "can_rate": True},
+        comments=comments,
+    )
 
 
 @router.patch(
@@ -87,16 +96,28 @@ async def update_book(
 
     update_data = book_data.model_dump(exclude_unset=True)
 
-    # перевіряємо, якщо раптом category прийшов як рядок
-    if "category" in update_data and isinstance(update_data["category"], str):
-        update_data["category"] = [update_data["category"]]
-
     for key, value in update_data.items():
         setattr(book, key, value)
 
     await db.commit()
     await db.refresh(book)
-    return book
+
+    comments = await get_book_comments(book_id=book.id, db=db)
+
+    return BookResponse(
+        id=book.id,
+        title=book.title,
+        author=book.author,
+        year=book.year,
+        category=book.category,
+        language=book.language,
+        description=book.description,
+        cover_image=book.cover_image,
+        status=book.status,
+        average_rating=0.0,
+        my_rate={"id_rating": None, "value": None, "can_rate": True},
+        comments=comments,
+    )
 
 
 @router.delete(
@@ -151,6 +172,34 @@ async def delete_multiple_books(
     return {
         "message": "Books deleted successfully",
         "updated_items": [book.id for book in books],
+    }
+
+
+@router.delete("/comment/{comment_id}")
+async def delete_comment_and_reassign_replies(
+    comment_id: int,
+    db: AsyncSession = Depends(get_db),
+    librarian: dict = Depends(librarian_required),
+):
+    # 1. Отримати коментар
+    comment = await db.get(Comment, comment_id)
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    # 2. Перевстановити parent_id в сабкоментарів
+    result = await db.execute(select(Comment).where(Comment.parent_id == comment_id))
+    subcomments = result.scalars().all()
+
+    for sub in subcomments:
+        sub.parent_id = comment.parent_id  # reassignment
+        db.add(sub)  # оновлення
+
+    # 3. Видалити сам коментар
+    await db.delete(comment)
+    await db.commit()
+
+    return {
+        "message": f"Comment {comment_id} deleted. {len(subcomments)} subcomment(s) reassigned to parent {comment.parent_id}",
     }
 
 

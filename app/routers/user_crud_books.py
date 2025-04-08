@@ -227,9 +227,12 @@ async def get_favorite(
     user_id: int = Depends(get_current_user_id),
 ):
     result = await db.execute(
-        select(Wishlist)
-        .options(joinedload(Wishlist.book))
-        .where(Wishlist.user_id == user_id),
+    select(Wishlist)
+    .options(
+        joinedload(Wishlist.book),
+        joinedload(Wishlist.user),
+    )
+    .where(Wishlist.user_id == user_id),
     )
     wishlist = result.scalars().all()
-    return [WishlistItemResponse.from_orm(w) for w in wishlist]
+    return wishlist

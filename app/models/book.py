@@ -41,3 +41,8 @@ class Book(Base):
         back_populates="book",
         cascade="all, delete-orphan",
     )
+    comments = relationship(
+        "Comment",
+        back_populates="book",
+        cascade="all, delete-orphan",
+    )

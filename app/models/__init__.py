@@ -3,6 +3,8 @@
 # and changes applied to migration script
 
 from app.dependencies.database import Base
+
+from .comments import Comment
 from .wishlist import Wishlist
 
 # example

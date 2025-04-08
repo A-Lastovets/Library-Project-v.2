@@ -97,7 +97,7 @@ def send_reservation_email(email: str, book: dict, expires_at: str):
             <hr>
             <h3>📚 {book["title"]}</h3>
             <p><strong>✍️ Автор:</strong> {book["author"]}</p>
-            <p><strong>📖 Жанр:</strong> {book["category"]}</p>
+            <p><strong>📖 Жанр:</strong> {", ".join(book["category"])}</p>
             <p><strong>🌍 Мова:</strong> {book["language"]}</p>
             <p><strong>📅 Рік видання:</strong> {book["year"]}</p>
             <p><strong>📝 Опис:</strong> {book["description"]}</p>
@@ -127,7 +127,7 @@ def send_reservation_confirmation_email(email: str, book: dict, expires_at: str)
             <hr>
             <h3>📚 {book["title"]}</h3>
             <p><strong>✍️ Автор:</strong> {book["author"]}</p>
-            <p><strong>📖 Жанр:</strong> {book["category"]}</p>
+            <p><strong>📖 Жанр:</strong> {", ".join(book["category"])}</p>
             <p><strong>🌍 Мова:</strong> {book["language"]}</p>
             <p><strong>📅 Рік видання:</strong> {book["year"]}</p>
             <p><strong>📝 Опис:</strong> {book["description"]}</p>
@@ -240,7 +240,7 @@ def send_thank_you_email(user_email: str, book: dict):
             <hr>
             <h3>📚 {book["title"]}</h3>
             <p><strong>Автор:</strong> {book["author"]}</p>
-            <p><strong>Жанр:</strong> {book["category"]}</p>
+            <p><strong>📖 Жанр:</strong> {", ".join(book["category"])}</p>
             <p><strong>Мова:</strong> {book["language"]}</p>
             <p><strong>Рік видання:</strong> {book["year"]}</p>
             <p><strong>Опис:</strong> {book["description"]}</p>

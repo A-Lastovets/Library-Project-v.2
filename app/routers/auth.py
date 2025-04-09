@@ -19,9 +19,9 @@ from app.schemas.schemas import (
     PasswordChange,
     PasswordReset,
     PasswordResetRequest,
-    Token,
     UserCreate,
     UserResponse,
+    UserUpdate,
 )
 from app.services.email_tasks import (
     send_password_changed_email,
@@ -520,3 +520,41 @@ async def refresh_token(
     )
 
     return {"message": "Access token refreshed"}
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return user
+
+
+@router.patch("/me", response_model=UserResponse, status_code=status.HTTP_200_OK)
+async def update_me(
+    updates: UserUpdate,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Якщо email змінюється — перевірити, що він унікальний
+    if updates.email and updates.email != user.email:
+        result = await db.execute(select(User).where(User.email == updates.email))
+        existing = result.scalar_one_or_none()
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already in use")
+
+    for field, value in updates.model_dump(exclude_unset=True).items():
+        setattr(user, field, value)
+
+    await db.commit()
+    await db.refresh(user)
+
+    return user

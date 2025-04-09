@@ -80,6 +80,12 @@ class UserResponse(UserBase):
         from_attributes = True
 
 
+class UserUpdate(BaseSchema):
+    first_name: Optional[str] = Field(None, min_length=3, max_length=50)
+    last_name: Optional[str] = Field(None, min_length=3, max_length=50)
+    email: Optional[EmailStr] = None
+
+
 class Token(BaseSchema):
     access_token: str
     refresh_token: str
@@ -256,6 +262,7 @@ class BookShortResponse(BaseSchema):
 
     class Config:
         from_attributes = True
+
 
 class WishlistAddRequest(BaseModel):
     book_id: int

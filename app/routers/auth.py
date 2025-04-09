@@ -29,6 +29,7 @@ from app.services.email_tasks import (
     send_user_blocked_email,
     send_user_unblocked_email,
     send_welcome_email,
+    send_profile_update_notification,
 )
 from app.services.user_service import (
     authenticate_user,
@@ -555,6 +556,9 @@ async def update_me(
         setattr(user, field, value)
 
     await db.commit()
+
+    send_profile_update_notification(user.email, f"{user.first_name} {user.last_name}")
+    
     await db.refresh(user)
 
     return user

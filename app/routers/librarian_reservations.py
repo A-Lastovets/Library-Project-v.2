@@ -13,6 +13,7 @@ from app.exceptions.pagination import paginate_response
 from app.models.book import BookStatus
 from app.models.reservation import Reservation, ReservationStatus
 from app.schemas.schemas import BookResponse, ReservationResponse
+from app.services.books_service import book_to_dict_for_email
 from app.services.email_tasks import (
     send_book_checked_out_email,
     send_reservation_cancelled_email,
@@ -81,7 +82,7 @@ async def confirm_reservation_by_librarian(
     # Відправляємо e-mail користувачу про підтвердження бронювання
     send_reservation_confirmation_email(
         reservation.user.email,
-        BookResponse.model_validate(book).model_dump(),
+        book_to_dict_for_email(book),
         reservation.expires_at.strftime("%Y-%m-%d %H:%M"),
     )
 
@@ -267,7 +268,7 @@ async def confirm_book_return_by_librarian(
     # Відправка e-mail підтвердження повернення книги
     send_thank_you_email(
         reservation.user.email,
-        BookResponse.model_validate(book).model_dump(),
+        book_to_dict_for_email(book),
     )
 
     # Логування події

@@ -6,11 +6,13 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 from sqlalchemy.sql import func
 
+from app.dependencies.cache import redis_client
 from app.dependencies.database import get_db
 from app.exceptions.pagination import paginate_response
 from app.exceptions.serialization import serialize_book_with_reservation
 from app.exceptions.subquery_reserv import get_latest_reservation_alias
 from app.models.book import Book, BookStatus
+from app.models.comments import Comment
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.wishlist import Wishlist
 from app.schemas.schemas import (
@@ -227,12 +229,47 @@ async def get_favorite(
     user_id: int = Depends(get_current_user_id),
 ):
     result = await db.execute(
-    select(Wishlist)
-    .options(
-        joinedload(Wishlist.book),
-        joinedload(Wishlist.user),
-    )
-    .where(Wishlist.user_id == user_id),
+        select(Wishlist)
+        .options(
+            joinedload(Wishlist.book),
+            joinedload(Wishlist.user),
+        )
+        .where(Wishlist.user_id == user_id),
     )
     wishlist = result.scalars().all()
     return wishlist
+
+
+@router.delete("/user/comments/{comment_id}")
+async def delete_own_comment(
+    comment_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+    redis=Depends(redis_client.get_redis),
+):
+    comment = await db.get(Comment, comment_id)
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    if comment.user_id != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only delete your own comment",
+        )
+
+    book_id = comment.book_id
+
+    # Якщо головний коментар — видаляємо також саб (якщо є)
+    if comment.parent_id is None:
+        sub_result = await db.execute(
+            select(Comment).where(Comment.parent_id == comment_id),
+        )
+        sub_comment = sub_result.scalar_one_or_none()
+        if sub_comment:
+            await db.delete(sub_comment)
+
+    await db.delete(comment)
+    await db.commit()
+    await redis.delete(f"comments:book:{book_id}")
+
+    return {"message": "Comment deleted"}

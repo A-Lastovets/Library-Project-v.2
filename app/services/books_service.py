@@ -52,3 +52,20 @@ async def get_filtered_books(
     books = result.fetchall()
 
     return total_books, books
+
+
+def book_to_dict_for_email(book: Book) -> dict:
+    return {
+        "id": book.id,
+        "title": book.title,
+        "author": book.author,
+        "year": book.year,
+        "category": book.category,
+        "language": book.language,
+        "description": book.description,
+        "cover_image": book.cover_image,
+        "status": book.status.value,
+        "average_rating": 0.0,
+        "my_rate": None,
+        "comments": [],
+    }

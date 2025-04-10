@@ -10,7 +10,8 @@ from sqlalchemy.sql import func
 from app.dependencies.database import get_db
 from app.models.book import Book, BookStatus
 from app.models.reservation import Reservation, ReservationStatus
-from app.schemas.schemas import BookResponse, ReservationCreate, ReservationResponse
+from app.schemas.schemas import ReservationCreate, ReservationResponse
+from app.services.books_service import book_to_dict_for_email
 from app.services.email_tasks import send_reservation_email
 from app.services.user_service import check_and_block_user, get_active_user_id
 
@@ -120,7 +121,7 @@ async def create_reservation(
     # Відправляємо e-mail
     send_reservation_email(
         new_reservation.user.email,
-        BookResponse.model_validate(book).model_dump(),
+        book_to_dict_for_email(book),
         new_reservation.expires_at.strftime("%Y-%m-%d"),
     )
 

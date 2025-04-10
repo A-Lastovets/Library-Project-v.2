@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
 
+from app.dependencies.cache import redis_client
 from app.dependencies.database import get_db
 from app.exceptions.pagination import paginate_response
 from app.models.book import Book
@@ -71,6 +72,7 @@ async def find_book(
     book_id: int,
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
+    redis=Depends(redis_client.get_redis),
 ):
 
     result = await db.execute(select(Book).where(Book.id == book_id))
@@ -100,7 +102,7 @@ async def find_book(
         can_rate=user_rating is None,
     )
 
-    comments = await get_book_comments(book_id=book_id, db=db)
+    comments = await get_book_comments(book_id=book_id, db=db, redis=redis)
 
     return BookResponse(
         id=book.id,
@@ -169,53 +171,67 @@ async def rate_book(
     )
 
 
-@router.post("/comment/{book_id}")
-async def add_comment(
+@router.post("/comments/{book_id}")
+async def create_comment(
     book_id: int,
     content: str,
+    parent_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    user_id: int = Depends(get_active_user_id),
+    user_id: int = Depends(get_current_user_id),
+    redis=Depends(redis_client.get_redis),
 ):
-    comment = Comment(book_id=book_id, user_id=user_id, content=content)
+    # Якщо це головний коментар — перевірити обмеження
+    if parent_id is None:
+        count_query = await db.execute(
+            select(func.count()).where(
+                Comment.book_id == book_id,
+                Comment.parent_id.is_(None),
+            ),
+        )
+        if count_query.scalar() >= 5:
+            raise HTTPException(
+                status_code=400,
+                detail="Максимум 5 головних коментарів",
+            )
+
+    else:
+        # Перевірити існування батьківського коментаря
+        parent = await db.get(Comment, parent_id)
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent comment not found")
+
+        if parent.parent_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Неможливо відповісти на субкоментар",
+            )
+
+        # Перевірити, чи до parent вже додано сабкоментар
+        reply_exists = await db.execute(
+            select(Comment).where(Comment.parent_id == parent_id),
+        )
+        if reply_exists.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail="До цього коментаря вже є відповідь",
+            )
+
+    comment = Comment(
+        book_id=book_id,
+        user_id=user_id,
+        content=content,
+        parent_id=parent_id,
+    )
     db.add(comment)
     await db.commit()
     await db.refresh(comment)
 
+    await redis.delete(f"comments:book:{book_id}")
     user = await db.get(User, user_id)
-    author = f"{user.first_name} {user.last_name}" if user else "Unknown user"
 
     return {
-        "message": "Comment added",
+        "message": "Comment created" if parent_id is None else "Reply created",
         "comment_id": comment.id,
-        "author": author,
-    }
-
-
-@router.post("/comment/{comment_id}/reply")
-async def reply_comment(
-    comment_id: int,
-    content: str,
-    db: AsyncSession = Depends(get_db),
-    user_id: int = Depends(get_active_user_id),
-):
-    parent_comment = await db.get(Comment, comment_id)
-    if not parent_comment:
-        raise HTTPException(status_code=404, detail="Parent comment not found")
-
-    reply = Comment(
-        book_id=parent_comment.book_id,
-        user_id=user_id,
-        content=content,
-        parent_id=comment_id,
-    )
-    db.add(reply)
-    await db.commit()
-    await db.refresh(reply)
-    user = await db.get(User, user_id)
-    author = f"{user.first_name} {user.last_name}" if user else "Unknown user"
-
-    return {
-        "message": "Reply added",
-        "subcomment_id": reply.id,
-        "author": author,
+        "author": f"{user.first_name} {user.last_name}",
+        "author_id": user.id,
     }

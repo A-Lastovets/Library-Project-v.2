@@ -1,14 +1,14 @@
 import re
-import phonenumbers
 from datetime import datetime
 from typing import Annotated, List, Optional
 
+import phonenumbers
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 # from app.config import config
 from app.models.book import BookStatus
 from app.models.reservation import ReservationStatus
-from app.models.user import UserRole, GenderEnum
+from app.models.user import GenderEnum, UserRole
 from app.models.wishlist import Wishlist
 from app.oauth2 import validate_password_schema
 
@@ -100,7 +100,9 @@ class UserUpdate(BaseSchema):
             if not phonenumbers.is_valid_number(parsed):
                 raise ValueError("Невалідний номер телефону")
         except phonenumbers.NumberParseException:
-            raise ValueError("Невірний формат номеру. Використовуйте міжнародний формат (наприклад, +380991234567)")
+            raise ValueError(
+                "Невірний формат номеру. Використовуйте міжнародний формат (наприклад, +380991234567)",
+            )
         return phone_number
 
 
@@ -177,23 +179,21 @@ class SubCommentResponse(BaseModel):
     subcomment_id: int
     subcomment: str
     author: str
+    author_id: int
     created_at: datetime
-    sub_comments: Optional[List["SubCommentResponse"]] = []
 
     class Config:
         alias_generator = BaseSchema.Config.alias_generator
         populate_by_name = True
 
 
-SubCommentResponse.model_rebuild()
-
-
 class CommentResponse(BaseModel):
     comment_id: int
     comment: str
     author: str
+    author_id: int
     created_at: datetime
-    sub_comments: List[SubCommentResponse]
+    sub_comment: Optional[SubCommentResponse] = None
 
     class Config:
         alias_generator = BaseSchema.Config.alias_generator

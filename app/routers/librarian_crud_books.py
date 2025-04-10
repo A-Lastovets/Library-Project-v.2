@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
 
+from app.dependencies.cache import redis_client
 from app.dependencies.database import get_db
 from app.exceptions.pagination import paginate_response
 from app.exceptions.serialization import serialize_book_with_user_reservation
@@ -34,6 +35,7 @@ async def create_book(
     book_data: BookCreate,
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
+    redis=Depends(redis_client.get_redis),
 ):
 
     stmt = select(Book).where(
@@ -57,7 +59,7 @@ async def create_book(
     await db.commit()
     await db.refresh(new_book)
 
-    comments = await get_book_comments(book_id=new_book.id, db=db)
+    comments = await get_book_comments(book_id=new_book.id, db=db, redis=redis)
 
     return BookResponse(
         id=new_book.id,
@@ -85,6 +87,7 @@ async def update_book(
     book_data: BookUpdate,
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(librarian_required),
+    redis=Depends(redis_client.get_redis),
 ):
     """Оновлення книги (тільки бібліотекар)."""
     book = await db.get(Book, book_id)
@@ -102,7 +105,7 @@ async def update_book(
     await db.commit()
     await db.refresh(book)
 
-    comments = await get_book_comments(book_id=book.id, db=db)
+    comments = await get_book_comments(book_id=book.id, db=db, redis=redis)
 
     return BookResponse(
         id=book.id,
@@ -175,32 +178,33 @@ async def delete_multiple_books(
     }
 
 
-@router.delete("/comment/{comment_id}")
-async def delete_comment_and_reassign_replies(
+@router.delete("/librarian/comments/{comment_id}")
+async def delete_comment_by_librarian(
     comment_id: int,
     db: AsyncSession = Depends(get_db),
-    librarian: dict = Depends(librarian_required),
+    _: dict = Depends(librarian_required),
+    redis=Depends(redis_client.get_redis),
 ):
-    # 1. Отримати коментар
     comment = await db.get(Comment, comment_id)
     if not comment:
         raise HTTPException(status_code=404, detail="Comment not found")
 
-    # 2. Перевстановити parent_id в сабкоментарів
-    result = await db.execute(select(Comment).where(Comment.parent_id == comment_id))
-    subcomments = result.scalars().all()
+    book_id = comment.book_id
 
-    for sub in subcomments:
-        sub.parent_id = comment.parent_id  # reassignment
-        db.add(sub)  # оновлення
+    # Якщо головний — видаляємо саб (якщо є)
+    if comment.parent_id is None:
+        sub_result = await db.execute(
+            select(Comment).where(Comment.parent_id == comment_id),
+        )
+        sub_comment = sub_result.scalar_one_or_none()
+        if sub_comment:
+            await db.delete(sub_comment)
 
-    # 3. Видалити сам коментар
     await db.delete(comment)
     await db.commit()
+    await redis.delete(f"comments:book:{book_id}")
 
-    return {
-        "message": f"Comment {comment_id} deleted. {len(subcomments)} subcomment(s) reassigned to parent {comment.parent_id}",
-    }
+    return {"message": "Comment deleted by librarian"}
 
 
 @router.get("/librarian/status", response_model=dict)

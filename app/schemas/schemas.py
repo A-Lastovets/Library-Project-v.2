@@ -1,4 +1,5 @@
 import re
+import phonenumbers
 from datetime import datetime
 from typing import Annotated, List, Optional
 
@@ -7,7 +8,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 # from app.config import config
 from app.models.book import BookStatus
 from app.models.reservation import ReservationStatus
-from app.models.user import UserRole
+from app.models.user import UserRole, GenderEnum
 from app.models.wishlist import Wishlist
 from app.oauth2 import validate_password_schema
 
@@ -75,6 +76,8 @@ class UserResponse(UserBase):
     id: int
     role: UserRole
     is_blocked: bool
+    phone_number: Optional[str] = None
+    gender: Optional[GenderEnum] = None
 
     class Config:
         from_attributes = True
@@ -84,6 +87,21 @@ class UserUpdate(BaseSchema):
     first_name: Optional[str] = Field(None, min_length=3, max_length=50)
     last_name: Optional[str] = Field(None, min_length=3, max_length=50)
     email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
+    gender: Optional[GenderEnum] = None
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone(cls, phone_number: str):
+        if phone_number is None:
+            return phone_number
+        try:
+            parsed = phonenumbers.parse(phone_number)
+            if not phonenumbers.is_valid_number(parsed):
+                raise ValueError("Невалідний номер телефону")
+        except phonenumbers.NumberParseException:
+            raise ValueError("Невірний формат номеру. Використовуйте міжнародний формат (наприклад, +380991234567)")
+        return phone_number
 
 
 class Token(BaseSchema):

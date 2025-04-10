@@ -27,6 +27,10 @@ celery_app.conf.update(
             "task": "app.services.email_tasks.check_and_send_return_reminders",
             "schedule": crontab(minute=0, hour="*/2"),
         },
+        "check-wishlist-availability-every-5-minutes": {
+            "task": "app.services.email_tasks.check_wishlist_availability",
+            "schedule": crontab(minute="*/60"),
+        },
     },
 )
 celery_app.autodiscover_tasks(["app.services.email_tasks"])

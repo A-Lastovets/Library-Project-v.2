@@ -8,9 +8,10 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
 from app.dependencies.database import SessionLocal
-from app.models.book import BookStatus
+from app.models.book import Book, BookStatus
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.user import User
+from app.models.wishlist import Wishlist
 from app.services.celery_config import celery_app
 from app.services.email_service import send_email
 
@@ -461,6 +462,56 @@ def check_and_send_return_reminders():
         asyncio.set_event_loop(loop)
 
     loop.run_until_complete(_check_and_send_return_reminders())
+
+
+@celery_app.task
+def check_wishlist_availability():
+    import asyncio
+
+    from app.dependencies.database import SessionLocal
+
+    async def process():
+        async with SessionLocal() as db:
+            result = await db.execute(
+                select(Wishlist)
+                .options(joinedload(Wishlist.book), joinedload(Wishlist.user))
+                .where(Book.status == BookStatus.AVAILABLE),
+            )
+            wish_items = result.unique().scalars().all()
+            print(
+                f"🔍 Знайдено {len(wish_items)} книг у wishlist зі статусом AVAILABLE",
+            )
+
+            for item in wish_items:
+                if not item.book or not item.user:
+                    print("⚠️ Пропущено: немає книги або користувача")
+                    continue
+
+                subject = f"📖 Книга '{item.book.title}' вже доступна!"
+                body = f"""
+                <p>Привіт, {item.user.first_name}!</p>
+                <p>Книга <strong>{item.book.title}</strong>, яку ви додали до списку бажаного, тепер доступна для бронювання.</p>
+                <p>Поспішіть, щоб не втратити можливість!</p>
+                <p>📚 Ваша бібліотека</p>
+                """
+
+                try:
+                    print(
+                        f"📨 Надсилаємо лист для {item.user.email} про {item.book.title}",
+                    )
+                    await send_email(item.user.email, subject, body, html=True)
+                except Exception as e:
+                    print(f"❌ Помилка відправки: {e}")
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(process())
 
 
 async def _check_and_send_return_reminders():

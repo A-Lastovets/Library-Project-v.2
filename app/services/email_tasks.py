@@ -362,9 +362,27 @@ def send_welcome_email(user_email: str, user_name: str):
 
 
 @celery_app.task
-def send_profile_update_notification(user_email: str, user_name: str):
+def send_profile_update_notification(
+    user_email: str,
+    user_name: str,
+    changed_fields: list[str],
+):
     """📩 Сповіщення про зміну профілю"""
+
     subject = "🔧 Ваш профіль було оновлено"
+
+    # Генеруємо блок змінених полів
+    changes_map = {
+        "first_name": "📝 Ім’я",
+        "last_name": "📝 Прізвище",
+        "email": "📧 Email",
+        "phone_number": "📱 Номер телефону",
+        "gender": "🚻 Стать",
+    }
+
+    changes_html = "\n".join(
+        f"<li>{changes_map[field]}</li>" for field in changed_fields
+    )
 
     body = f"""
     <html>
@@ -374,17 +392,16 @@ def send_profile_update_notification(user_email: str, user_name: str):
 
             <p>Ми хочемо повідомити вас, що <strong>дані вашого профілю були успішно оновлені</strong>.</p>
 
-            <h3>Що саме могло змінитись?</h3>
+            <h3>🔍 Що саме змінилось?</h3>
             <ul>
-                <li>📝 Ім’я або прізвище</li>
-                <li>📧 Email</li>
+                {changes_html}
             </ul>
 
             <hr>
             <p>❗ <strong>Якщо ви не вносили ці зміни</strong>, будь ласка, <u>негайно зверніться до адміністратора</u> або нашої служби підтримки.</p>
 
             <br>
-            <p>З повагою,<br><strong>Команда вашої бібліотеки</strong></p>
+            <p>📚 З повагою,<br><strong>Команда вашої бібліотеки</strong></p>
         </body>
     </html>
     """

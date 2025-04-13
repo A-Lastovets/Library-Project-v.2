@@ -557,7 +557,12 @@ async def update_me(
 
     await db.commit()
 
-    send_profile_update_notification(user.email, f"{user.first_name} {user.last_name}")
+    updated_fields = list(updates.model_dump(exclude_unset=True).keys())
+    send_profile_update_notification(
+        user.email,
+        f"{user.first_name} {user.last_name}",
+        updated_fields,
+    )
 
     await db.refresh(user)
 

@@ -64,6 +64,7 @@ SQLAlchemy==2.0.38
 starlette==0.45.3
 typing_extensions==4.12.2
 tzdata==2025.1
+uuid_utils==0.10.0
 uvicorn==0.34.0
 vine==5.1.0
 virtualenv==20.29.2

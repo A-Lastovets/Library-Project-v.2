@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 from typing import Annotated, List, Optional
-
+from uuid import UUID
 import phonenumbers
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -294,3 +294,25 @@ class WishlistItemResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ChatStartRequest(BaseModel):
+    message: str
+
+class ChatSessionResponse(BaseModel):
+    session_id: UUID
+    status: str
+    created_at: datetime
+
+class ChatTakeRequest(BaseModel):
+    session_id: UUID
+
+class ChatCloseRequest(BaseModel):
+    session_id: UUID
+
+class ChatMessageResponse(BaseModel):
+    message: str
+    sender_id: UUID
+    sender_full_name: str
+    session_id: UUID
+    timestamp: datetime

@@ -108,3 +108,14 @@ async def check_and_block_user(db: AsyncSession, user_id: int):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are blocked due to overdue books. Contact the librarian to unblock.",
         )
+
+
+async def get_current_user(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    user_id = await get_current_user_id(request)
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user

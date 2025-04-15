@@ -18,6 +18,7 @@ from app.routers import (
     statistics,
     user_crud_books,
     user_reservations,
+    chat_router,
 )
 
 dictConfig(LogConfig().dict())
@@ -69,5 +70,6 @@ app.include_router(librarian_reservations.router, prefix="/api/v1")
 app.include_router(user_crud_books.router, prefix="/api/v1")
 app.include_router(user_reservations.router, prefix="/api/v1")
 app.include_router(statistics.router, prefix="/api/v1")
+app.include_router(chat_router.router, prefix="/api/v1")
 
 logger.info("✅ Library API успішно запущено!")

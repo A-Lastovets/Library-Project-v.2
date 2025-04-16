@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status,  WebSocket
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -109,7 +109,6 @@ async def check_and_block_user(db: AsyncSession, user_id: int):
             detail="You are blocked due to overdue books. Contact the librarian to unblock.",
         )
 
-
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -119,3 +118,26 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+async def librarian_ws_required(websocket: WebSocket) -> dict:
+    print("🔐 WS HEADERS:", websocket.headers)
+    print("🔐 WS COOKIES:", websocket.cookies)
+    token = websocket.cookies.get("access_token")
+    print("🔐 TOKEN from WS:", token)
+
+    if not token:
+        raise Exception("Not authenticated")
+
+    try:
+        token_data = decode_jwt_token(token)
+    except Exception as e:
+        print("❌ Token decode failed:", e)
+        raise Exception("Invalid token")
+
+    if token_data.get("role") != "librarian":
+        print("⛔ Not a librarian!")
+        raise Exception("Librarian role required")
+
+    return {"id": token_data["id"], "role": "librarian"}
+

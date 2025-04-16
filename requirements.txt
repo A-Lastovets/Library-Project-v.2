@@ -26,6 +26,7 @@ filelock==3.17.0
 flake8==7.1.2
 greenlet==3.1.1
 h11==0.14.0
+httptools==0.6.4
 identify==2.6.8
 idna==3.10
 isort==6.0.1
@@ -68,5 +69,7 @@ uuid_utils==0.10.0
 uvicorn==0.34.0
 vine==5.1.0
 virtualenv==20.29.2
+watchfiles==1.0.5
 wcwidth==0.2.13
+websockets==15.0.1
 wheel==0.38.4

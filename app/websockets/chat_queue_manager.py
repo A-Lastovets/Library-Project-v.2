@@ -6,7 +6,6 @@ class ChatQueueManager:
         self.active_connections: List[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
-        await websocket.accept()
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
@@ -15,10 +14,13 @@ class ChatQueueManager:
 
     async def broadcast_new_chat(self, session_data: dict):
         for connection in self.active_connections:
-            await connection.send_json({
-                "event": "new_chat",
-                "data": session_data
-            })
+            try:
+                await connection.send_json({
+                    "event": "new_chat",
+                    "data": session_data
+                })
+            except Exception as e:
+                print(f"❌ Не вдалося надіслати повідомлення: {e}")
 
 
 chat_queue_manager = ChatQueueManager()

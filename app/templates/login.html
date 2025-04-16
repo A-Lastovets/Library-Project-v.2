@@ -1,0 +1,39 @@
+<!-- login.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Login</title>
+</head>
+<body>
+  <h2>Login</h2>
+  <form id="login-form">
+    <input type="email" id="email" placeholder="Email" required><br>
+    <input type="password" id="password" placeholder="Password" required><br>
+    <button type="submit">Login</button>
+  </form>
+
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+
+      const res = await fetch('http://localhost:8000/api/v1/auth/sign-in', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      if (res.ok) {
+        const user = await res.json();
+        const payload = JSON.parse(atob(document.cookie.split('access_token=')[1].split('.')[1]));
+        const role = payload.role;
+        if (role === 'reader') location.href = '/html/reader/start-chat.html';
+        else location.href = '/html/librarian/take-chat.html';
+      } else {
+        alert('Login failed');
+      }
+    });
+  </script>
+</body>
+</html>

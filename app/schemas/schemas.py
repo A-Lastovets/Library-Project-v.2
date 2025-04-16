@@ -300,19 +300,19 @@ class ChatStartRequest(BaseModel):
     message: str
 
 class ChatSessionResponse(BaseModel):
-    session_id: UUID
+    session_id: int
     status: str
     created_at: datetime
 
 class ChatTakeRequest(BaseModel):
-    session_id: UUID
+    session_id: int
 
 class ChatCloseRequest(BaseModel):
-    session_id: UUID
+    session_id: int
 
 class ChatMessageResponse(BaseModel):
     message: str
-    sender_id: UUID
+    sender_id: int
     sender_full_name: str
-    session_id: UUID
+    session_id: int
     timestamp: datetime

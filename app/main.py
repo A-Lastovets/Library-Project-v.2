@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from logging.config import dictConfig
 
 from fastapi import FastAPI
-
+from fastapi.staticfiles import StaticFiles
 from app.config import LogConfig
 from app.dependencies.cache import redis_client
 from app.dependencies.database import SessionLocal, init_db
@@ -71,5 +71,9 @@ app.include_router(user_crud_books.router, prefix="/api/v1")
 app.include_router(user_reservations.router, prefix="/api/v1")
 app.include_router(statistics.router, prefix="/api/v1")
 app.include_router(chat_router.router, prefix="/api/v1")
+
+
+# app.mount("/html", StaticFiles(directory="app/templates"), name="html")
+
 
 logger.info("✅ Library API успішно запущено!")

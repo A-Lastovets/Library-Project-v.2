@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Live Черга Бібліотекарів</title>
+</head>
+<body>
+  <h2>📡 Live Queue /ws/queue</h2>
+  <pre id="log" style="background:#f4f4f4; padding:10px; height:300px; overflow:auto;"></pre>
+
+  <script>
+    function getCookie(name) {
+      const value = `; ${document.cookie}`;
+      const parts = value.split(`; ${name}=`);
+      if (parts.length === 2) return parts.pop().split(';').shift();
+    }
+
+    const token = getCookie("access_token");
+
+    if (!token) {
+      alert("❌ Не знайдено access_token. Увійдіть як бібліотекар.");
+    } else {
+      const ws = new WebSocket("ws://localhost:8000/ws/queue");
+
+      ws.onopen = function () {
+        document.getElementById("log").innerText += "✅ Підключено до черги...\n";
+      };
+
+      ws.onmessage = function (event) {
+        const data = JSON.parse(event.data);
+        const log = document.getElementById("log");
+
+        if (data.event === "new_chat") {
+          const chat = data.data;
+          log.innerText += `🆕 Новий чат:\n`;
+          log.innerText += `- ID сесії: ${chat.session_id}\n`;
+          log.innerText += `- Reader ID: ${chat.reader_id}\n`;
+          log.innerText += `- Статус: ${chat.status}\n`;
+          log.innerText += `- Час: ${chat.created_at}\n\n`;
+        } else {
+          log.innerText += `📩 Інше повідомлення: ${JSON.stringify(data)}\n`;
+        }
+      };
+
+      ws.onclose = function () {
+        alert("🔌 З'єднання закрито.");
+      };
+    }
+  </script>
+</body>
+</html>

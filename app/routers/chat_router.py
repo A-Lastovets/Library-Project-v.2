@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from uuid import uuid4, UUID
 from sqlalchemy import select
 from app.models.chat import ChatSession, ChatMessage
 from app.models.user import User
@@ -12,12 +11,15 @@ from app.schemas.schemas import (
 from app.dependencies.database import get_db
 from app.services.user_service import get_current_user
 from fastapi import WebSocket, WebSocketDisconnect
-from app.services.user_service import librarian_required
+from app.services.user_service import librarian_ws_required, librarian_required
 from app.websockets.chat_queue_manager import chat_queue_manager
 from app.websockets.chat_room_manager import chat_room_manager
 from app.utils import decode_jwt_token
+import logging
 
-router = APIRouter(prefix="/chat", tags=["Chat"])
+router = APIRouter(tags=["Chat"])
+
+logger = logging.getLogger(__name__)
 
 @router.post("/start", response_model=ChatSessionResponse)
 async def start_chat(
@@ -41,7 +43,6 @@ async def start_chat(
 
     # Створення нової сесії
     session = ChatSession(
-        id=uuid4(),
         reader_id=current_user.id,
         status="pending"
     )
@@ -50,7 +51,6 @@ async def start_chat(
 
     # Збереження першого повідомлення
     message = ChatMessage(
-        id=uuid4(),
         session_id=session.id,
         sender_id=current_user.id,
         message=payload.message
@@ -75,9 +75,18 @@ async def start_chat(
 
 @router.websocket("/ws/queue")
 async def librarian_queue_ws(websocket: WebSocket):
-    _ = await librarian_required(websocket)
-    await chat_queue_manager.connect(websocket)
+    try:
+        # Перевірка токена ДО accept
+        librarian_data = await librarian_ws_required(websocket)
 
+        # Якщо пройшло — приймаємо підключення
+        await websocket.accept()
+    except Exception as e:
+        print("❌ Auth WS queue error:", e)
+        await websocket.close(code=1008)
+        return
+
+    await chat_queue_manager.connect(websocket)
     try:
         while True:
             await websocket.receive_text()
@@ -85,9 +94,10 @@ async def librarian_queue_ws(websocket: WebSocket):
         chat_queue_manager.disconnect(websocket)
 
 
+
 @router.post("/chat/{session_id}/assign")
 async def take_chat(
-    session_id: UUID,
+    session_id: int,
     db: AsyncSession = Depends(get_db),
     librarian_data: dict = Depends(librarian_required)
 ):
@@ -112,31 +122,52 @@ async def take_chat(
 
 
 @router.websocket("/ws/chat/{room_id}")
-async def private_chat_ws(websocket: WebSocket, room_id: str, db: AsyncSession = Depends(get_db)):
-    await websocket.accept()
-
+async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession = Depends(get_db)):
+    logger.info(f"📦 WebSocket headers: {websocket.headers}")
+    logger.info(f"📦 WebSocket cookies: {websocket.cookies}")
     token = websocket.cookies.get("access_token")
+
     if not token:
+        logger.warning("❌ Немає access_token в куках!")
         await websocket.close(code=1008)
         return
 
     try:
         user_data = decode_jwt_token(token)
-    except Exception:
+        logger.info(f"📨 Decoded token: {user_data}")
+        user_id = int(user_data.get("id"))
+        role = user_data.get("role")
+        logger.info(f"🪪 TOKEN USER ID: {user_id} | ROLE: {role}")
+    except Exception as e:
+        logger.error(f"❌ decode error: {e.__class__.__name__} - {e}")
+        await websocket.close(code=1008)
+        return
+    
+    result = await db.execute(select(ChatSession).where(ChatSession.id == room_id))
+    session = result.scalar_one_or_none()
+
+    if session is None:
+        logger.warning("❌ Сесія не знайдена!")
+        await websocket.close(code=1008)
+        return
+    
+    allowed_ids = {id for id in [session.reader_id, session.librarian_id] if id is not None}
+    logger.info(f"📦 allowed_ids: {allowed_ids}, type={type(list(allowed_ids)[0]) if allowed_ids else 'empty'}")
+
+    logger.info(f"📦 ВСІ Сесії: {session}")
+    logger.info(f"📦 user_id={user_id}, читач={session.reader_id}, бібліотекар={session.librarian_id}")
+    logger.info(f"📦 allowed_ids: {allowed_ids}")
+
+    if int(user_id) not in allowed_ids:
+        logger.warning("🚫 Доступ до чату заборонено.")
         await websocket.close(code=1008)
         return
 
-    user_id = int(user_data["id"])
-    role = user_data["role"]
+    await websocket.accept()
+
     user = await db.get(User, user_id)
     full_name = f"{user.first_name} {user.last_name}"
     display_role = "Читач" if role == "reader" else "Бібліотекар"
-
-    result = await db.execute(select(ChatSession).where(ChatSession.id == room_id))
-    session = result.scalar_one_or_none()
-    if not session or (user_id not in [session.reader_id, session.librarian_id]):
-        await websocket.close(code=1008)
-        return
 
     await chat_room_manager.connect(room_id, websocket)
 
@@ -144,38 +175,25 @@ async def private_chat_ws(websocket: WebSocket, room_id: str, db: AsyncSession =
         while True:
             data = await websocket.receive_json()
 
-            # Обробка: користувач "пише"
             if "typing" in data:
-                if data["typing"]:
-                    await chat_room_manager.send_to_room(room_id, {
-                        "info": f"{display_role} пише...",
-                        "sender_full_name": full_name,
-                        "typing": True
-                    })
-                else:
-                    await chat_room_manager.send_to_room(room_id, {
-                        "typing": False
-                    })
+                await chat_room_manager.send_to_room(room_id, {
+                    "info": f"{display_role} пише..." if data["typing"] else "",
+                    "sender_full_name": full_name,
+                    "typing": data["typing"]
+                })
                 continue
 
-            # Обробка повідомлення
             text = data.get("message")
             if not text:
                 continue
-            
-            # 🔒 Перевіряємо, чи чат вже завершено
+
             result = await db.execute(select(ChatSession).where(ChatSession.id == room_id))
             session = result.scalar_one_or_none()
             if not session or session.status == "closed":
                 await websocket.send_json({"info": "Цей чат завершено. Нові повідомлення недоступні."})
                 continue
 
-            message = ChatMessage(
-                id=uuid4(),
-                session_id=room_id,
-                sender_id=user_id,
-                message=text
-            )
+            message = ChatMessage(session_id=room_id, sender_id=user_id, message=text)
             db.add(message)
             await db.commit()
 
@@ -191,9 +209,9 @@ async def private_chat_ws(websocket: WebSocket, room_id: str, db: AsyncSession =
 
 @router.post("/chat/{session_id}/close")
 async def close_chat(
-    session_id: UUID,
+    session_id: int,
     db: AsyncSession = Depends(get_db),
-    librarian_data: dict = Depends(librarian_required)
+    librarian_data: dict = Depends(librarian_ws_required)
 ):
     librarian_id = int(librarian_data["id"])
 

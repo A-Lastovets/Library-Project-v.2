@@ -14,22 +14,26 @@
       const parts = value.split(`; ${name}=`);
       if (parts.length === 2) return parts.pop().split(';').shift();
     }
-
-    const token = getCookie("access_token");
-
-    if (!token) {
-      alert("❌ Не знайдено access_token. Увійдіть як бібліотекар.");
-    } else {
-      const ws = new WebSocket("ws://localhost:8000/ws/queue");
-
+  
+    document.addEventListener("DOMContentLoaded", () => {
+      const token = getCookie("access_token");
+  
+      if (!token) {
+        alert("❌ Token не знайдено. Спочатку увійдіть у систему.");
+        return;
+      }
+  
+      // 🔐 Передаємо токен як query параметр
+      const ws = new WebSocket(`ws://localhost:8000/ws/queue?token=${token}`);
+  
       ws.onopen = function () {
         document.getElementById("log").innerText += "✅ Підключено до черги...\n";
       };
-
+  
       ws.onmessage = function (event) {
         const data = JSON.parse(event.data);
         const log = document.getElementById("log");
-
+  
         if (data.event === "new_chat") {
           const chat = data.data;
           log.innerText += `🆕 Новий чат:\n`;
@@ -41,11 +45,15 @@
           log.innerText += `📩 Інше повідомлення: ${JSON.stringify(data)}\n`;
         }
       };
-
+  
       ws.onclose = function () {
         alert("🔌 З'єднання закрито.");
       };
-    }
+  
+      ws.onerror = function () {
+        document.getElementById("log").innerText += "❌ Помилка WebSocket-з'єднання\n";
+      };
+    });
   </script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from app.models.chat import ChatSession, ChatMessage
 from app.models.user import User
 from app.schemas.schemas import (
@@ -47,7 +48,7 @@ async def start_chat(
         status="pending"
     )
     db.add(session)
-    await db.flush()  # потрібно для отримання session.id до створення повідомлення
+    await db.flush()
 
     # Збереження першого повідомлення
     message = ChatMessage(
@@ -69,15 +70,40 @@ async def start_chat(
     return ChatSessionResponse(
         session_id=session.id,
         status=session.status,
-        created_at=session.created_at
+        created_at=session.created_at,
+        reader_full_name=f"{current_user.first_name} {current_user.last_name}"
     )
+
+
+@router.get("/chat/active-sessions", response_model=list[ChatSessionResponse])
+async def get_active_chat_sessions(
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(librarian_required)
+):
+    result = await db.execute(
+        select(ChatSession)
+        .options(joinedload(ChatSession.reader))
+        .where(ChatSession.status == "pending")
+        .order_by(ChatSession.created_at)
+    )
+    sessions = result.scalars().all()
+
+    return [
+        ChatSessionResponse(
+            session_id=session.id,
+            status=session.status,
+            created_at=session.created_at,
+            reader_full_name=f"{session.reader.first_name} {session.reader.last_name}"
+        )
+        for session in sessions
+    ]
 
 
 @router.websocket("/ws/queue")
 async def librarian_queue_ws(websocket: WebSocket):
     try:
-        # Перевірка токена ДО accept
-        librarian_data = await librarian_ws_required(websocket)
+        # Перевірка токена до accept
+        _ = await librarian_ws_required(websocket)
 
         # Якщо пройшло — приймаємо підключення
         await websocket.accept()
@@ -92,7 +118,6 @@ async def librarian_queue_ws(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         chat_queue_manager.disconnect(websocket)
-
 
 
 @router.post("/chat/{session_id}/assign")
@@ -206,12 +231,26 @@ async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession =
     except WebSocketDisconnect:
         chat_room_manager.disconnect(room_id, websocket)
 
+        # Повідомлення іншій стороні
+        other_role = "Читач" if role == "librarian" else "Бібліотекар"
+        notice = f"{display_role} покинув чат. Розмову завершено."
+
+        result = await db.execute(select(ChatSession).where(ChatSession.id == room_id))
+        session = result.scalar_one_or_none()
+        if session:
+            await chat_room_manager.send_to_room(room_id, {
+                "event": "chat_closed",
+                "info": notice
+            })
+            await db.delete(session)
+            await db.commit()
+
 
 @router.post("/chat/{session_id}/close")
 async def close_chat(
     session_id: int,
     db: AsyncSession = Depends(get_db),
-    librarian_data: dict = Depends(librarian_ws_required)
+    librarian_data: dict = Depends(librarian_required)
 ):
     librarian_id = int(librarian_data["id"])
 
@@ -227,56 +266,8 @@ async def close_chat(
     if not session:
         raise HTTPException(status_code=404, detail="Active chat not found.")
 
-    session.status = "closed"
+    # Повне видалення сесії (разом із повідомленнями)
+    await db.delete(session)
     await db.commit()
 
-    # Сповіщення у кімнаті
-    await chat_room_manager.send_to_room(str(session.id), {
-    "event": "closed",
-    "info": "Чат завершено бібліотекарем"
-    })
-    
-    return {"detail": "Chat closed successfully."}
-
-
-@router.get("/history", response_model=list[ChatMessageResponse])
-async def get_full_chat_history(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    # 1. Отримати всі сесії користувача
-    result = await db.execute(
-        select(ChatSession.id).where(ChatSession.reader_id == current_user.id)
-    )
-    session_ids = [row[0] for row in result.all()]
-    if not session_ids:
-        return []
-
-    # 2. Отримати всі повідомлення
-    result = await db.execute(
-        select(ChatMessage)
-        .where(ChatMessage.session_id.in_(session_ids))
-        .order_by(ChatMessage.timestamp)
-    )
-    messages = result.scalars().all()
-    if not messages:
-        return []
-
-    # 3. Отримати всіх користувачів, які надсилали повідомлення
-    sender_ids = list({msg.sender_id for msg in messages})
-    result = await db.execute(
-        select(User.id, User.first_name, User.last_name).where(User.id.in_(sender_ids))
-    )
-    users = {row.id: f"{row.first_name} {row.last_name}" for row in result.all()}
-
-    # 4. Побудувати відповідь
-    return [
-        ChatMessageResponse(
-            message=m.message,
-            sender_id=m.sender_id,
-            sender_full_name=users.get(m.sender_id, "Unknown user"),
-            session_id=m.session_id,
-            timestamp=m.timestamp
-        )
-        for m in messages
-    ]
+    return {"detail": "Chat deleted successfully."}

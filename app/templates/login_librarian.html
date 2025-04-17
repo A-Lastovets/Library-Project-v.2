@@ -31,26 +31,21 @@
       });
 
       if (res.ok) {
-        setTimeout(() => {
-          const token = getCookie("access_token");
-          if (!token) {
-            alert("❌ Не вдалося отримати токен. Перевір бекенд.");
-            return;
-          }
-
+        setTimeout(async () => {
           try {
+            const token = await res.text(); // або отримай його з іншого джерела, якщо не в тілі
             const payload = JSON.parse(atob(token.split('.')[1]));
             const role = payload.role;
 
             if (role === 'reader') {
-              location.href = '/html/reader/start-chat.html';
+              location.href = '/html/reader/start_chat.html';
             } else {
-              location.href = '/html/queue_client.html'; // ✅ редірект на live-чергу
+              location.href = '/html/queue_client.html';
             }
           } catch (e) {
-            alert("❌ Помилка декодування токена.");
+            alert("❌ Помилка декодування токена або ролі.");
           }
-        }, 300); // невелика пауза — куки точно встигнуть записатись
+        }, 300);
       } else {
         alert('❌ Невдалий логін. Перевір email або пароль.');
       }

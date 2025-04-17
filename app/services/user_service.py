@@ -3,7 +3,7 @@ from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.sql import func
-
+from http.cookies import SimpleCookie
 from app.dependencies.database import get_db
 from app.models.book import Book, BookStatus
 from app.models.reservation import Reservation
@@ -121,13 +121,18 @@ async def get_current_user(
 
 
 async def librarian_ws_required(websocket: WebSocket) -> dict:
-    print("🔐 WS HEADERS:", websocket.headers)
-    print("🔐 WS COOKIES:", websocket.cookies)
+    # Спочатку намагаємось дістати куку через стандартний метод
     token = websocket.cookies.get("access_token")
-    print("🔐 TOKEN from WS:", token)
+
+    # Якщо не спрацювало — парсимо вручну з headers
+    if not token:
+        raw_cookie = websocket.headers.get("cookie", "")
+        parsed = SimpleCookie()
+        parsed.load(raw_cookie)
+        token = parsed.get("access_token").value if "access_token" in parsed else None
 
     if not token:
-        raise Exception("Not authenticated")
+        raise Exception("Not authenticated (token not found)")
 
     try:
         token_data = decode_jwt_token(token)

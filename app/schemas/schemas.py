@@ -303,6 +303,10 @@ class ChatSessionResponse(BaseModel):
     session_id: int
     status: str
     created_at: datetime
+    reader_full_name: Optional[str] = None
+
+    class Config:
+        orm_mode = True
 
 class ChatTakeRequest(BaseModel):
     session_id: int

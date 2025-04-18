@@ -196,6 +196,21 @@ async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession =
 
     await chat_room_manager.connect(room_id, websocket)
 
+    result = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.session_id == room_id)
+        .order_by(ChatMessage.timestamp)
+    )
+    messages = result.scalars().all()
+
+    for msg in messages:
+        sender = await db.get(User, msg.sender_id)
+        await websocket.send_json({
+            "from": "Читач" if sender.role == "reader" else "Бібліотекар",
+            "sender_full_name": f"{sender.first_name} {sender.last_name}",
+            "message": msg.message
+        })
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -222,11 +237,19 @@ async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession =
             db.add(message)
             await db.commit()
 
-            await chat_room_manager.send_to_room(room_id, {
+            # Спочатку показати автору його повідомлення
+            await websocket.send_json({
                 "from": display_role,
                 "sender_full_name": full_name,
                 "message": text
             })
+
+            # Потім іншим учасникам
+            await chat_room_manager.send_to_room(room_id, {
+                "from": display_role,
+                "sender_full_name": full_name,
+                "message": text
+            }, exclude=websocket)
 
     except WebSocketDisconnect:
         chat_room_manager.disconnect(room_id, websocket)

@@ -320,3 +320,6 @@ class ChatMessageResponse(BaseModel):
     sender_full_name: str
     session_id: int
     timestamp: datetime
+
+    class Config:
+        orm_mode = True

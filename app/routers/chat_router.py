@@ -210,7 +210,8 @@ async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession =
                 await chat_room_manager.send_to_room(room_id, {
                     "info": f"{display_role} пише..." if data["typing"] else "",
                     "sender_full_name": full_name,
-                    "typing": data["typing"]
+                    "typing": data["typing"],
+                    "sender_id": user_id
                 })
                 continue
 

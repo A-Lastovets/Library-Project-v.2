@@ -148,8 +148,6 @@ async def take_chat(
 
 @router.websocket("/ws/chat/{room_id}")
 async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession = Depends(get_db)):
-    logger.info(f"📦 WebSocket headers: {websocket.headers}")
-    logger.info(f"📦 WebSocket cookies: {websocket.cookies}")
     token = websocket.cookies.get("access_token")
 
     if not token:
@@ -159,12 +157,9 @@ async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession =
 
     try:
         user_data = decode_jwt_token(token)
-        logger.info(f"📨 Decoded token: {user_data}")
         user_id = int(user_data.get("id"))
         role = user_data.get("role")
-        logger.info(f"🪪 TOKEN USER ID: {user_id} | ROLE: {role}")
     except Exception as e:
-        logger.error(f"❌ decode error: {e.__class__.__name__} - {e}")
         await websocket.close(code=1008)
         return
     
@@ -177,11 +172,6 @@ async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession =
         return
     
     allowed_ids = {id for id in [session.reader_id, session.librarian_id] if id is not None}
-    logger.info(f"📦 allowed_ids: {allowed_ids}, type={type(list(allowed_ids)[0]) if allowed_ids else 'empty'}")
-
-    logger.info(f"📦 ВСІ Сесії: {session}")
-    logger.info(f"📦 user_id={user_id}, читач={session.reader_id}, бібліотекар={session.librarian_id}")
-    logger.info(f"📦 allowed_ids: {allowed_ids}")
 
     if int(user_id) not in allowed_ids:
         logger.warning("🚫 Доступ до чату заборонено.")
@@ -208,7 +198,8 @@ async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession =
         await websocket.send_json({
             "from": "Читач" if sender.role == "reader" else "Бібліотекар",
             "sender_full_name": f"{sender.first_name} {sender.last_name}",
-            "message": msg.message
+            "message": msg.message,
+            "sender_id": sender.id
         })
 
     try:
@@ -241,14 +232,16 @@ async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession =
             await websocket.send_json({
                 "from": display_role,
                 "sender_full_name": full_name,
-                "message": text
+                "message": text,
+                "sender_id": user_id
             })
 
             # Потім іншим учасникам
             await chat_room_manager.send_to_room(room_id, {
                 "from": display_role,
                 "sender_full_name": full_name,
-                "message": text
+                "message": text,
+                "sender_id": user_id
             }, exclude=websocket)
 
     except WebSocketDisconnect:
@@ -273,7 +266,7 @@ async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession =
 async def close_chat(
     session_id: int,
     db: AsyncSession = Depends(get_db),
-    librarian_data: dict = Depends(librarian_required)
+    librarian_data: dict = Depends(get_current_user)
 ):
     librarian_id = int(librarian_data["id"])
 

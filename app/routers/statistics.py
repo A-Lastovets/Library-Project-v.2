@@ -1,11 +1,15 @@
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy import exists, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy.orm import joinedload
 from app.dependencies.database import get_db
 from app.models.book import Book, BookStatus
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.user import User, UserRole
+from app.schemas.schemas import BookShortResponse
+from app.dependencies.cache import redis_client
+import json
 
 router = APIRouter(prefix="/stats", tags=["Statistics"])
 
@@ -95,3 +99,52 @@ async def get_statistics(db: AsyncSession = Depends(get_db)):
         "books_by_category": books_by_category,
         "returned_books": returned_books,
     }
+
+
+@router.get("/month-top", response_model=list[BookShortResponse])
+async def get_month_top_books(db: AsyncSession = Depends(get_db)):
+    redis = await redis_client.get_redis()
+    cache_key = "month_top_books"
+    cached_data = await redis.get(cache_key)
+
+    if cached_data:
+        return json.loads(cached_data)
+
+    now = datetime.now()
+    month_ago = now - timedelta(days=30)
+
+    result = await db.execute(
+        select(Book)
+        .join(Reservation)
+        .where(
+            Reservation.status == ReservationStatus.COMPLETED,
+            Reservation.expires_at >= month_ago,
+        )
+        .distinct()
+        .limit(10)
+    )
+    completed_books = result.scalars().all()
+
+    if len(completed_books) < 10:
+        exclude_ids = [book.id for book in completed_books]
+        extra_result = await db.execute(
+            select(Book)
+            .where(
+                ~Book.id.in_(exclude_ids),
+                Book.status == BookStatus.AVAILABLE,
+            )
+            .order_by(func.random())
+            .limit(10 - len(completed_books))
+        )
+        completed_books += extra_result.scalars().all()
+
+    serialized_books = [
+        BookShortResponse.model_validate(book) for book in completed_books
+    ]
+    await redis.set(
+        cache_key,
+        json.dumps([book.model_dump() for book in serialized_books]),
+        ex=600,
+    )
+
+    return serialized_books

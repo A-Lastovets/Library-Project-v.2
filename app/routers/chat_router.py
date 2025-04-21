@@ -267,14 +267,13 @@ async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession =
 async def close_chat(
     session_id: int,
     db: AsyncSession = Depends(get_db),
-    librarian_data: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
-    librarian_id = int(librarian_data["id"])
+    user_id = current_user.id
 
     result = await db.execute(
         select(ChatSession).where(
             ChatSession.id == session_id,
-            ChatSession.librarian_id == librarian_id,
             ChatSession.status == "active"
         )
     )
@@ -283,6 +282,9 @@ async def close_chat(
     if not session:
         raise HTTPException(status_code=404, detail="Active chat not found.")
 
+    if user_id not in {session.reader_id, session.librarian_id}:
+        raise HTTPException(status_code=403, detail="You are not a participant of this chat.")
+    
     # Повне видалення сесії (разом із повідомленнями)
     await db.delete(session)
     await db.commit()

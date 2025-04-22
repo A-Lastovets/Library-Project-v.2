@@ -206,6 +206,10 @@ async def private_chat_ws(websocket: WebSocket, room_id: int, db: AsyncSession =
         while True:
             data = await websocket.receive_json()
 
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
+
             if "typing" in data:
                 await chat_room_manager.send_to_room(room_id, {
                     "info": f"{display_role} пише..." if data["typing"] else "",

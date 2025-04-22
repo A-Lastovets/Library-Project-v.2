@@ -270,22 +270,30 @@ async def close_chat(
     current_user: User = Depends(get_current_user)
 ):
     user_id = current_user.id
+    role = current_user.role
+    display_role = "Читач" if role == "reader" else "Бібліотекар"
 
     result = await db.execute(
         select(ChatSession).where(
             ChatSession.id == session_id,
-            ChatSession.status == "active"
+            ChatSession.status.in_(["active", "pending"])
         )
     )
     session = result.scalar_one_or_none()
 
     if not session:
-        raise HTTPException(status_code=404, detail="Active chat not found.")
+        raise HTTPException(status_code=404, detail="Chat session not found.")
 
     if user_id not in {session.reader_id, session.librarian_id}:
         raise HTTPException(status_code=403, detail="You are not a participant of this chat.")
-    
-    # Повне видалення сесії (разом із повідомленнями)
+
+    # Сповіщення іншим учасникам
+    await chat_room_manager.send_to_room(str(session.id), {
+        "event": "chat_closed",
+        "info": f"{display_role} покинув чат. Розмову завершено."
+    })
+
+    # Видалення сесії
     await db.delete(session)
     await db.commit()
 

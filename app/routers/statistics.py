@@ -103,12 +103,6 @@ async def get_statistics(db: AsyncSession = Depends(get_db)):
 
 @router.get("/month-top", response_model=list[BookShortResponse])
 async def get_month_top_books(db: AsyncSession = Depends(get_db)):
-    redis = await redis_client.get_redis()
-    cache_key = "month_top_books"
-    cached_data = await redis.get(cache_key)
-
-    if cached_data:
-        return json.loads(cached_data)
 
     now = datetime.now()
     month_ago = now - timedelta(days=30)
@@ -121,7 +115,7 @@ async def get_month_top_books(db: AsyncSession = Depends(get_db)):
             Reservation.expires_at >= month_ago,
         )
         .distinct()
-        .limit(10)
+        .limit(10),
     )
     completed_books = result.scalars().all()
 
@@ -134,17 +128,8 @@ async def get_month_top_books(db: AsyncSession = Depends(get_db)):
                 Book.status == BookStatus.AVAILABLE,
             )
             .order_by(func.random())
-            .limit(10 - len(completed_books))
+            .limit(10 - len(completed_books)),
         )
         completed_books += extra_result.scalars().all()
 
-    serialized_books = [
-        BookShortResponse.model_validate(book) for book in completed_books
-    ]
-    await redis.set(
-        cache_key,
-        json.dumps([book.model_dump() for book in serialized_books]),
-        ex=600,
-    )
-
-    return serialized_books
+    return completed_books

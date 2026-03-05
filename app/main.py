@@ -62,6 +62,15 @@ app = FastAPI(
 
 setup_middlewares(app)
 
+@app.get("/", include_in_schema=False)
+def root():
+    """Кореневий маршрут для health check та перевірки доступності API."""
+    return {
+        "message": "Library API is running",
+        "docs": "/docs",
+        "version": "1.0",
+    }
+
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(general_crud_books.router, prefix="/api/v1")
 app.include_router(general_reservations.router, prefix="/api/v1")

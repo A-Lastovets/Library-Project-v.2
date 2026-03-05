@@ -1,0 +1,43 @@
+<!-- app/templates/start-chat.html -->
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <title>Почати чат</title>
+</head>
+<body>
+  <h1>Почати чат з бібліотекарем</h1>
+  <form id="startChatForm">
+    <label for="message">Ваше повідомлення:</label><br>
+    <textarea id="message" name="message" rows="5" cols="40" required></textarea><br><br>
+    <button type="submit">Надіслати</button>
+  </form>
+
+  <div id="error" style="color: red;"></div>
+
+  <script>
+    document.getElementById("startChatForm").addEventListener("submit", async function (e) {
+      e.preventDefault();
+
+      const message = document.getElementById("message").value;
+      const response = await fetch("/api/v1/start", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ message })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const roomId = data.session_id;
+        window.location.href = `/html/chat_client.html?room_id=${roomId}`;
+      } else {
+        const err = await response.json();
+        document.getElementById("error").textContent = err.detail || "Помилка при створенні чату";
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+<!-- app/templates/chat_client.html -->
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Чат з бібліотекарем</title>
+  <style>
+    body { font-family: Arial; }
+    #chat { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; }
+    .message { margin-bottom: 5px; }
+    .info { font-style: italic; color: gray; }
+  </style>
+</head>
+<body>
+  <h2>Чат</h2>
+  <div id="chat"></div>
+  <div id="typing" class="info"></div>
+
+  <form id="chatForm">
+    <input type="text" id="messageInput" placeholder="Введіть повідомлення..." autocomplete="off" required />
+    <button type="submit">Надіслати</button>
+  </form>
+
+  <script>
+    const chatBox = document.getElementById("chat");
+    const form = document.getElementById("chatForm");
+    const input = document.getElementById("messageInput");
+    const typingDiv = document.getElementById("typing");
+
+    const params = new URLSearchParams(window.location.search);
+    const roomId = params.get("room_id");
+
+    if (!roomId) {
+      chatBox.innerHTML = "<p class='info'>❌ Не вказано room_id у URL</p>";
+      throw new Error("room_id not found");
+    }
+
+    const ws = new WebSocket(`ws://${location.host}/api/v1/ws/chat/${roomId}`);
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.message) {
+        const el = document.createElement("div");
+        el.classList.add("message");
+        el.innerHTML = `<b>${data.sender_full_name || data.from}:</b> ${data.message}`;
+        chatBox.appendChild(el);
+        chatBox.scrollTop = chatBox.scrollHeight;
+        typingDiv.textContent = "";
+      } else if (data.info && data.typing !== undefined) {
+        typingDiv.textContent = data.info;
+      } else if (data.info) {
+        const el = document.createElement("div");
+        el.classList.add("info");
+        el.textContent = data.info;
+        chatBox.appendChild(el);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
+    };
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (text) {
+        ws.send(JSON.stringify({ message: text }));
+        input.value = "";
+        ws.send(JSON.stringify({ typing: false }));
+      }
+    });
+
+    input.addEventListener("input", () => {
+      ws.send(JSON.stringify({ typing: true }));
+      clearTimeout(window.typingTimeout);
+      window.typingTimeout = setTimeout(() => {
+        ws.send(JSON.stringify({ typing: false }));
+      }, 1000);
+    });
+  </script>
+</body>
+</html>

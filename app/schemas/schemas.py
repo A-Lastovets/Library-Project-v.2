@@ -1,13 +1,15 @@
 import re
 from datetime import datetime
 from typing import Annotated, List, Optional
-
+from uuid import UUID
+import phonenumbers
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 # from app.config import config
 from app.models.book import BookStatus
 from app.models.reservation import ReservationStatus
-from app.models.user import UserRole
+from app.models.user import GenderEnum, UserRole
+from app.models.wishlist import Wishlist
 from app.oauth2 import validate_password_schema
 
 
@@ -74,9 +76,34 @@ class UserResponse(UserBase):
     id: int
     role: UserRole
     is_blocked: bool
+    phone_number: Optional[str] = None
+    gender: Optional[GenderEnum] = None
 
     class Config:
         from_attributes = True
+
+
+class UserUpdate(BaseSchema):
+    first_name: Optional[str] = Field(None, min_length=3, max_length=50)
+    last_name: Optional[str] = Field(None, min_length=3, max_length=50)
+    email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
+    gender: Optional[GenderEnum] = None
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone(cls, phone_number: str):
+        if phone_number is None:
+            return phone_number
+        try:
+            parsed = phonenumbers.parse(phone_number)
+            if not phonenumbers.is_valid_number(parsed):
+                raise ValueError("Невалідний номер телефону")
+        except phonenumbers.NumberParseException:
+            raise ValueError(
+                "Невірний формат номеру. Використовуйте міжнародний формат (наприклад, +380991234567)",
+            )
+        return phone_number
 
 
 class Token(BaseSchema):
@@ -120,14 +147,73 @@ class PasswordChange(BaseSchema):
         return confirm_new_password
 
 
+class MyRate(BaseModel):
+    id_rating: Optional[int]
+    value: Optional[float]
+    can_rate: bool
+
+    class Config:
+        alias_generator = BaseSchema.Config.alias_generator
+        populate_by_name = True
+
+
+class MyRateResponse(BaseModel):
+    id_rating: int
+    value: float
+    can_rate: bool
+
+    class Config:
+        alias_generator = BaseSchema.Config.alias_generator
+        populate_by_name = True
+
+
+class RateBookResponse(BaseModel):
+    my_rate: MyRateResponse
+
+    class Config:
+        alias_generator = BaseSchema.Config.alias_generator
+        populate_by_name = True
+
+
+class SubCommentResponse(BaseModel):
+    subcomment_id: int
+    subcomment: str
+    author: str
+    author_id: int
+    created_at: datetime
+
+    class Config:
+        alias_generator = BaseSchema.Config.alias_generator
+        populate_by_name = True
+
+
+class CommentResponse(BaseModel):
+    comment_id: int
+    comment: str
+    author: str
+    author_id: int
+    created_at: datetime
+    sub_comment: Optional[SubCommentResponse] = None
+
+    class Config:
+        alias_generator = BaseSchema.Config.alias_generator
+        populate_by_name = True
+
+
 class BookBase(BaseSchema):
     title: str = Field(..., min_length=1, max_length=255)
     author: str = Field(..., min_length=1, max_length=255)
     year: int
-    category: str
+    category: List[str]
     language: str
     description: Optional[str] = None
     cover_image: str
+
+    @field_validator("category", mode="before")
+    def ensure_list(cls, v):
+        if isinstance(v, str):
+            return [v]
+        return v
 
 
 class BookCreate(BookBase):
@@ -142,6 +228,8 @@ class BookResponse(BookBase):
     id: int
     status: BookStatus
     average_rating: float = 0.0
+    my_rate: Optional[MyRate] = None
+    comments: Optional[List[CommentResponse]] = []
 
     class Config:
         from_attributes = True
@@ -176,3 +264,62 @@ class ReservationResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class BookShortResponse(BaseSchema):
+    id: int
+    title: str
+    author: str
+    year: int
+    category: List[str]
+    language: str
+    description: Optional[str]
+    cover_image: str
+    status: BookStatus
+    average_rating: float = 0.0
+
+    class Config:
+        from_attributes = True
+
+
+class WishlistAddRequest(BaseModel):
+    book_id: int
+
+
+class WishlistItemResponse(BaseModel):
+    id: int
+    added_at: datetime
+    book: BookShortResponse
+    user: UserResponse
+
+    class Config:
+        from_attributes = True
+
+
+class ChatStartRequest(BaseModel):
+    message: str
+
+class ChatSessionResponse(BaseModel):
+    session_id: int
+    status: str
+    created_at: datetime
+    reader_full_name: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+
+class ChatTakeRequest(BaseModel):
+    session_id: int
+
+class ChatCloseRequest(BaseModel):
+    session_id: int
+
+class ChatMessageResponse(BaseModel):
+    message: str
+    sender_id: int
+    sender_full_name: str
+    session_id: int
+    timestamp: datetime
+
+    class Config:
+        orm_mode = True

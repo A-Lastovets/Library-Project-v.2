@@ -11,6 +11,10 @@ class UserRole(str, PyEnum):
     READER = "reader"
     LIBRARIAN = "librarian"
 
+class GenderEnum(str, PyEnum):
+    MALE = "male"
+    FEMALE = "female"
+    OTHER = "other"
 
 class User(Base):
     __tablename__ = "users"
@@ -26,7 +30,9 @@ class User(Base):
         nullable=False,
     )
     is_blocked = Column(Boolean, default=False, nullable=False)
-
+    phone_number = Column(String, nullable=True)
+    gender = Column(Enum(GenderEnum, native_enum=False), nullable=True)
+    
     ratings = relationship(
         "Rating",
         back_populates="user",
@@ -34,6 +40,18 @@ class User(Base):
     )
     reservations = relationship(
         "Reservation",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    wishlist = relationship(
+        "Wishlist",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    comments = relationship(
+        "Comment",
         back_populates="user",
         cascade="all, delete-orphan",
     )

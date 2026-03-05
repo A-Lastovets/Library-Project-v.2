@@ -1,9 +1,9 @@
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status,  WebSocket
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.sql import func
-
+from http.cookies import SimpleCookie
 from app.dependencies.database import get_db
 from app.models.book import Book, BookStatus
 from app.models.reservation import Reservation
@@ -108,3 +108,41 @@ async def check_and_block_user(db: AsyncSession, user_id: int):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are blocked due to overdue books. Contact the librarian to unblock.",
         )
+
+async def get_current_user(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    user_id = await get_current_user_id(request)
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+async def librarian_ws_required(websocket: WebSocket) -> dict:
+    # Спочатку намагаємось дістати куку через стандартний метод
+    token = websocket.cookies.get("access_token")
+
+    # Якщо не спрацювало — парсимо вручну з headers
+    if not token:
+        raw_cookie = websocket.headers.get("cookie", "")
+        parsed = SimpleCookie()
+        parsed.load(raw_cookie)
+        token = parsed.get("access_token").value if "access_token" in parsed else None
+
+    if not token:
+        raise Exception("Not authenticated (token not found)")
+
+    try:
+        token_data = decode_jwt_token(token)
+    except Exception as e:
+        print("❌ Token decode failed:", e)
+        raise Exception("Invalid token")
+
+    if token_data.get("role") != "librarian":
+        print("⛔ Not a librarian!")
+        raise Exception("Librarian role required")
+
+    return {"id": token_data["id"], "role": "librarian"}
+

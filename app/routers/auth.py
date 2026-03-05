@@ -19,13 +19,14 @@ from app.schemas.schemas import (
     PasswordChange,
     PasswordReset,
     PasswordResetRequest,
-    Token,
     UserCreate,
     UserResponse,
+    UserUpdate,
 )
 from app.services.email_tasks import (
     send_password_changed_email,
     send_password_reset_email,
+    send_profile_update_notification,
     send_user_blocked_email,
     send_user_unblocked_email,
     send_welcome_email,
@@ -49,10 +50,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-# 🔑 Логін користувача (отримання JWT-токена)
-@router.post("/sign-in", response_model=Token, status_code=status.HTTP_200_OK)
+# 🔑 Логін користувача через http-only cookies
+@router.post("/sign-in", status_code=status.HTTP_200_OK)
 async def sign_in(
-    request: Request,
     login_data: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -82,7 +82,7 @@ async def sign_in(
         httponly=True,
         secure=True,
         samesite="None",
-        max_age=3600,  # 1 година
+        max_age=3600,
     )
     response.set_cookie(
         key="refresh_token",
@@ -90,14 +90,14 @@ async def sign_in(
         httponly=True,
         secure=True,
         samesite="None",
-        max_age=7 * 24 * 60 * 60,  # 7 днів
+        max_age=7 * 24 * 60 * 60,
     )
 
     return response
 
 
 # Реєстрація користувача
-@router.post("/sign-up", response_model=Token, status_code=status.HTTP_201_CREATED)
+@router.post("/sign-up", status_code=status.HTTP_201_CREATED)
 async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
     existing_user = await get_user_by_email(db, user.email)
     if existing_user:
@@ -127,11 +127,30 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
 
     send_welcome_email(user.email, user.first_name)
 
-    return Token(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
+    user_data = UserResponse.model_validate(created_user).model_dump(by_alias=True)
+
+    response = JSONResponse(
+        content={"message": "User created successfully", "user": user_data},
     )
+
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="None",
+        max_age=3600,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="None",
+        max_age=7 * 24 * 60 * 60,
+    )
+
+    return response
 
 
 @router.post("/logout", response_model=dict, status_code=200)
@@ -502,3 +521,49 @@ async def refresh_token(
     )
 
     return {"message": "Access token refreshed"}
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return user
+
+
+@router.patch("/me", response_model=UserResponse, status_code=status.HTTP_200_OK)
+async def update_me(
+    updates: UserUpdate,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Якщо email змінюється — перевірити, що він унікальний
+    if updates.email and updates.email != user.email:
+        result = await db.execute(select(User).where(User.email == updates.email))
+        existing = result.scalar_one_or_none()
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already in use")
+
+    for field, value in updates.model_dump(exclude_unset=True).items():
+        setattr(user, field, value)
+
+    await db.commit()
+
+    updated_fields = list(updates.model_dump(exclude_unset=True).keys())
+    send_profile_update_notification(
+        user.email,
+        f"{user.first_name} {user.last_name}",
+        updated_fields,
+    )
+
+    await db.refresh(user)
+
+    return user

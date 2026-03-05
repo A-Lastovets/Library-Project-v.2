@@ -4,5 +4,8 @@
 
 from app.dependencies.database import Base
 
+from .comments import Comment
+from .wishlist import Wishlist
+
 # example
 # from app.models.users import Users

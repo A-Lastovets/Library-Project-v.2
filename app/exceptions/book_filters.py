@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import List, Optional
 
-from sqlalchemy import String
-from sqlalchemy.sql import Select, and_, or_
+from sqlalchemy import String, literal
+from sqlalchemy.sql import Select, and_, any_, or_
 
 from app.models.book import Book
 
@@ -10,7 +10,7 @@ def apply_book_filters(
     query: Select,
     title: Optional[str] = None,
     author: Optional[str] = None,
-    category: Optional[str] = None,
+    category: Optional[List[str]] = None,
     year: Optional[str] = None,
     language: Optional[str] = None,
     status: Optional[str] = None,
@@ -21,7 +21,8 @@ def apply_book_filters(
     if author:
         query = query.where(Book.author.ilike(f"%{author}%"))
     if category:
-        query = query.where(Book.category.ilike(f"%{category}%"))
+        conditions = [literal(cat) == any_(Book.category) for cat in category]
+        query = query.where(or_(*conditions))
     if year:
         query = query.where(Book.year.cast(String).ilike(f"%{year}%"))
     if language:
@@ -40,7 +41,7 @@ def apply_book_filters(
                     else or_(
                         Book.title.ilike(f"%{word}%"),
                         Book.author.ilike(f"%{word}%"),
-                        Book.category.ilike(f"%{word}%"),
+                        literal(word) == any_(Book.category),
                         Book.language.ilike(f"%{word}%"),
                     )
                 )

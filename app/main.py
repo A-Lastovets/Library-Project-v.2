@@ -3,13 +3,23 @@ from contextlib import asynccontextmanager
 from logging.config import dictConfig
 
 from fastapi import FastAPI
-
+from fastapi.staticfiles import StaticFiles
 from app.config import LogConfig
 from app.dependencies.cache import redis_client
 from app.dependencies.database import SessionLocal, init_db
 from app.middlewares.middlewares import setup_middlewares
 from app.roles import create_admin
-from app.routers import auth, crud_books, crud_reservation, statistics
+from app.routers import (
+    auth,
+    general_crud_books,
+    general_reservations,
+    librarian_crud_books,
+    librarian_reservations,
+    statistics,
+    user_crud_books,
+    user_reservations,
+    chat_router,
+)
 
 dictConfig(LogConfig().dict())
 logger = logging.getLogger("app")
@@ -52,9 +62,27 @@ app = FastAPI(
 
 setup_middlewares(app)
 
+@app.get("/", include_in_schema=False)
+def root():
+    """Кореневий маршрут для health check та перевірки доступності API."""
+    return {
+        "message": "Library API is running",
+        "docs": "/docs",
+        "version": "1.0",
+    }
+
 app.include_router(auth.router, prefix="/api/v1")
-app.include_router(crud_books.router, prefix="/api/v1")
-app.include_router(crud_reservation.router, prefix="/api/v1")
+app.include_router(general_crud_books.router, prefix="/api/v1")
+app.include_router(general_reservations.router, prefix="/api/v1")
+app.include_router(librarian_crud_books.router, prefix="/api/v1")
+app.include_router(librarian_reservations.router, prefix="/api/v1")
+app.include_router(user_crud_books.router, prefix="/api/v1")
+app.include_router(user_reservations.router, prefix="/api/v1")
 app.include_router(statistics.router, prefix="/api/v1")
+app.include_router(chat_router.router, prefix="/api/v1")
+
+
+# app.mount("/html", StaticFiles(directory="app/templates"), name="html")
+
 
 logger.info("✅ Library API успішно запущено!")

@@ -8,9 +8,10 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
 from app.dependencies.database import SessionLocal
-from app.models.book import BookStatus
+from app.models.book import Book, BookStatus
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.user import User
+from app.models.wishlist import Wishlist
 from app.services.celery_config import celery_app
 from app.services.email_service import send_email
 
@@ -97,7 +98,7 @@ def send_reservation_email(email: str, book: dict, expires_at: str):
             <hr>
             <h3>📚 {book["title"]}</h3>
             <p><strong>✍️ Автор:</strong> {book["author"]}</p>
-            <p><strong>📖 Жанр:</strong> {book["category"]}</p>
+            <p><strong>📖 Жанр:</strong> {", ".join(book["category"])}</p>
             <p><strong>🌍 Мова:</strong> {book["language"]}</p>
             <p><strong>📅 Рік видання:</strong> {book["year"]}</p>
             <p><strong>📝 Опис:</strong> {book["description"]}</p>
@@ -127,7 +128,7 @@ def send_reservation_confirmation_email(email: str, book: dict, expires_at: str)
             <hr>
             <h3>📚 {book["title"]}</h3>
             <p><strong>✍️ Автор:</strong> {book["author"]}</p>
-            <p><strong>📖 Жанр:</strong> {book["category"]}</p>
+            <p><strong>📖 Жанр:</strong> {", ".join(book["category"])}</p>
             <p><strong>🌍 Мова:</strong> {book["language"]}</p>
             <p><strong>📅 Рік видання:</strong> {book["year"]}</p>
             <p><strong>📝 Опис:</strong> {book["description"]}</p>
@@ -240,7 +241,7 @@ def send_thank_you_email(user_email: str, book: dict):
             <hr>
             <h3>📚 {book["title"]}</h3>
             <p><strong>Автор:</strong> {book["author"]}</p>
-            <p><strong>Жанр:</strong> {book["category"]}</p>
+            <p><strong>📖 Жанр:</strong> {", ".join(book["category"])}</p>
             <p><strong>Мова:</strong> {book["language"]}</p>
             <p><strong>Рік видання:</strong> {book["year"]}</p>
             <p><strong>Опис:</strong> {book["description"]}</p>
@@ -328,20 +329,77 @@ def send_welcome_email(user_email: str, user_name: str):
     body = f"""
     <html>
         <body>
-            <h2 style="color: #4CAF50;">📚 Ласкаво просимо до бібліотеки!</h2>
-            <p>Шановний(а) {user_name},</p>
-            <p>Ми раді вітати вас у нашій бібліотеці! Тут ви знайдете широкий вибір книг на будь-який смак.</p>
+            <h2 style="color: #4CAF50;">📚 Ласкаво просимо, {user_name}!</h2>
+            <p>Ми раді вітати вас у нашій онлайн-бібліотеці! Тепер у вас є доступ до сотень книжок на будь-який смак 📖</p>
+
             <hr>
-            <h3>📖 Що доступно в нашій бібліотеці?</h3>
+            <h3>🔐 Як увійти в систему?</h3>
+            <p>Використайте наступні дані для входу:</p>
             <ul>
-                <li>📚 Художня та наукова література</li>
-                <li>📘 Класичні та сучасні твори</li>
-                <li>🔍 Рідкісні книги та архівні матеріали</li>
-                <li>📅 Можливість бронювання книг онлайн</li>
+                <li><strong>Логін (email):</strong> {user_email}</li>
+                <li><strong>Пароль:</strong> (ви вказали його під час реєстрації — ми його не зберігаємо і не надсилаємо)</li>
             </ul>
+            <p>🔒 З міркувань безпеки ми не зберігаємо ваш пароль у відкритому вигляді.</p>
+
             <hr>
-            <p>✨ Ми впевнені, що серед наших книг ви знайдете щось цікаве для себе!</p>
-            <p>🌟 Почніть свою подорож у світ знань прямо зараз – заходьте на сайт та обирайте книги!</p>
+            <h3>📖 У нашій бібліотеці ви знайдете:</h3>
+            <ul>
+                <li>📚 Художню та наукову літературу</li>
+                <li>📘 Класичні й сучасні твори</li>
+                <li>🔍 Рідкісні книги та архіви</li>
+                <li>📅 Можливість бронювати книги онлайн</li>
+            </ul>
+
+            <p>✨ Почніть свою подорож у світ знань вже зараз – зайдіть на сайт та оберіть свою першу книгу!</p>
+            <br>
+            <p>З найкращими побажаннями,<br><strong>Команда вашої бібліотеки</strong></p>
+        </body>
+    </html>
+    """
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(send_email(user_email, subject, body, html=True))
+
+
+@celery_app.task
+def send_profile_update_notification(
+    user_email: str,
+    user_name: str,
+    changed_fields: list[str],
+):
+    """📩 Сповіщення про зміну профілю"""
+
+    subject = "🔧 Ваш профіль було оновлено"
+
+    # Генеруємо блок змінених полів
+    changes_map = {
+        "first_name": "📝 Ім’я",
+        "last_name": "📝 Прізвище",
+        "email": "📧 Email",
+        "phone_number": "📱 Номер телефону",
+        "gender": "🚻 Стать",
+    }
+
+    changes_html = "\n".join(
+        f"<li>{changes_map[field]}</li>" for field in changed_fields
+    )
+
+    body = f"""
+    <html>
+        <body>
+            <h2 style="color: #2196F3;">🔔 Оновлення профілю</h2>
+            <p>Шановний(а) {user_name},</p>
+
+            <p>Ми хочемо повідомити вас, що <strong>дані вашого профілю були успішно оновлені</strong>.</p>
+
+            <h3>🔍 Що саме змінилось?</h3>
+            <ul>
+                {changes_html}
+            </ul>
+
+            <hr>
+            <p>❗ <strong>Якщо ви не вносили ці зміни</strong>, будь ласка, <u>негайно зверніться до адміністратора</u> або нашої служби підтримки.</p>
+
             <br>
             <p>📚 З повагою,<br><strong>Команда вашої бібліотеки</strong></p>
         </body>
@@ -421,6 +479,56 @@ def check_and_send_return_reminders():
         asyncio.set_event_loop(loop)
 
     loop.run_until_complete(_check_and_send_return_reminders())
+
+
+@celery_app.task
+def check_wishlist_availability():
+    import asyncio
+
+    from app.dependencies.database import SessionLocal
+
+    async def process():
+        async with SessionLocal() as db:
+            result = await db.execute(
+                select(Wishlist)
+                .options(joinedload(Wishlist.book), joinedload(Wishlist.user))
+                .where(Book.status == BookStatus.AVAILABLE),
+            )
+            wish_items = result.unique().scalars().all()
+            print(
+                f"🔍 Знайдено {len(wish_items)} книг у wishlist зі статусом AVAILABLE",
+            )
+
+            for item in wish_items:
+                if not item.book or not item.user:
+                    print("⚠️ Пропущено: немає книги або користувача")
+                    continue
+
+                subject = f"📖 Книга '{item.book.title}' вже доступна!"
+                body = f"""
+                <p>Привіт, {item.user.first_name}!</p>
+                <p>Книга <strong>{item.book.title}</strong>, яку ви додали до списку бажаного, тепер доступна для бронювання.</p>
+                <p>Поспішіть, щоб не втратити можливість!</p>
+                <p>📚 Ваша бібліотека</p>
+                """
+
+                try:
+                    print(
+                        f"📨 Надсилаємо лист для {item.user.email} про {item.book.title}",
+                    )
+                    await send_email(item.user.email, subject, body, html=True)
+                except Exception as e:
+                    print(f"❌ Помилка відправки: {e}")
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(process())
 
 
 async def _check_and_send_return_reminders():
